@@ -25,7 +25,7 @@ const char* password = "diasdias";
 
 // PWM настройки
 #define PWM_FREQ 5000      // 5 кГц
-#define PWM_RESOLUTION 10  // 10 бит (0-1023)
+#define PWM_RESOLUTION 8   // 8 бит (0-255)
 
 // PWM каналы для каждого мотора
 #define PWM_CHANNEL_M1 0
@@ -39,8 +39,8 @@ AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 Preferences preferences;
 
-// Текущая скорость (0-1023)
-int currentSpeed = 819;  // 80% от 1023
+// Текущая скорость (0-255)
+int currentSpeed = 200;  // ~80% от 255
 
 // Конфигурация моторов
 // motorMapping[логическая_позиция] = физический_мотор
@@ -128,7 +128,7 @@ String getConfigJSON() {
 
 // Установить скорость и направление для одного ФИЗИЧЕСКОГО мотора
 void setPhysicalMotor(int motorNum, int speed) {
-  // speed: -1023 до 1023 (отрицательное = назад, положительное = вперед, 0 = стоп)
+  // speed: -255 до 255 (отрицательное = назад, положительное = вперед, 0 = стоп)
 
   int pwmChannel, pinD0, pinD1;
 
@@ -158,24 +158,28 @@ void setPhysicalMotor(int motorNum, int speed) {
   }
 
   if (speed == 0) {
-    // Стоп (тормоз) - оба LOW
+    // Холостой ход (по таблице TA6586)
     digitalWrite(pinD1, LOW);
     ledcWrite(pwmChannel, 0);
   } else if (speed > 0) {
-    // Вперед: D0 = PWM, D1 = LOW
+    // Вперёд: D0 = HIGH/PWM, D1 = LOW (по таблице TA6586)
     digitalWrite(pinD1, LOW);
+    delayMicroseconds(10);
     ledcWrite(pwmChannel, abs(speed));
   } else {
-    // Назад: D0 = PWM, D1 = HIGH
+    // Назад: D0 = LOW/PWM, D1 = HIGH (по таблице TA6586)
+    // LOW/PWM означает ИНВЕРТИРОВАННЫЙ PWM: больше скорость = меньше duty cycle!
+    int invertedPWM = 255 - abs(speed);
     digitalWrite(pinD1, HIGH);
-    ledcWrite(pwmChannel, abs(speed));
+    delayMicroseconds(10);
+    ledcWrite(pwmChannel, invertedPWM);
   }
 }
 
 // Установить скорость для ЛОГИЧЕСКОГО мотора (с учетом маппинга и инверсии)
 void setMotor(int logicalMotor, int speed) {
   // logicalMotor: 1-4 (логические позиции)
-  // speed: -1023 до 1023
+  // speed: -255 до 255
 
   if (logicalMotor < 1 || logicalMotor > 4) return;
 
@@ -328,7 +332,7 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
     // Изменение скорости
     else if (command.startsWith("speed:")) {
       int newSpeed = command.substring(6).toInt();
-      if (newSpeed >= 0 && newSpeed <= 1023) {
+      if (newSpeed >= 0 && newSpeed <= 255) {
         currentSpeed = newSpeed;
         Serial.println("Скорость изменена на: " + String(currentSpeed));
       }
@@ -818,8 +822,8 @@ const char index_html[] PROGMEM = R"rawliteral(
     <div class="tab-content active" id="tab-control">
       <div class="speed-control">
         <label>Скорость</label>
-        <input type="range" class="speed-slider" min="0" max="10" value="8" step="0.5" id="speedSlider" oninput="updateSpeed()">
-        <div class="speed-value" id="speedValue">8.0</div>
+        <input type="range" class="speed-slider" min="0" max="255" value="200" id="speedSlider" oninput="updateSpeed()">
+        <div class="speed-value" id="speedValue">200</div>
       </div>
 
       <div class="joystick-layout">
@@ -858,8 +862,8 @@ const char index_html[] PROGMEM = R"rawliteral(
     <div class="tab-content" id="tab-calibration">
       <div class="speed-control">
         <label>Скорость тестирования</label>
-        <input type="range" class="speed-slider" min="0" max="10" value="8" step="0.5" id="speedSlider2" oninput="updateSpeed2()">
-        <div class="speed-value" id="speedValue2">8.0</div>
+        <input type="range" class="speed-slider" min="0" max="255" value="200" id="speedSlider2" oninput="updateSpeed2()">
+        <div class="speed-value" id="speedValue2">200</div>
       </div>
 
       <div class="info-box">
@@ -1036,23 +1040,19 @@ const char index_html[] PROGMEM = R"rawliteral(
     }
 
     function updateSpeed() {
-      const sliderValue = parseFloat(document.getElementById('speedSlider').value);
-      const pwmValue = Math.round((10 - sliderValue) * 1023 / 10);
-
-      document.getElementById('speedValue').textContent = sliderValue.toFixed(1);
-      document.getElementById('speedSlider2').value = sliderValue;
-      document.getElementById('speedValue2').textContent = sliderValue.toFixed(1);
-      sendCommand('speed:' + pwmValue);
+      const speed = document.getElementById('speedSlider').value;
+      document.getElementById('speedValue').textContent = speed;
+      document.getElementById('speedSlider2').value = speed;
+      document.getElementById('speedValue2').textContent = speed;
+      sendCommand('speed:' + speed);
     }
 
     function updateSpeed2() {
-      const sliderValue = parseFloat(document.getElementById('speedSlider2').value);
-      const pwmValue = Math.round((10 - sliderValue) * 1023 / 10);
-
-      document.getElementById('speedValue2').textContent = sliderValue.toFixed(1);
-      document.getElementById('speedSlider').value = sliderValue;
-      document.getElementById('speedValue').textContent = sliderValue.toFixed(1);
-      sendCommand('speed:' + pwmValue);
+      const speed = document.getElementById('speedSlider2').value;
+      document.getElementById('speedValue2').textContent = speed;
+      document.getElementById('speedSlider').value = speed;
+      document.getElementById('speedValue').textContent = speed;
+      sendCommand('speed:' + speed);
     }
 
     function switchTab(index) {
@@ -1123,6 +1123,11 @@ void setup() {
   Serial.println("\n\n=================================");
   Serial.println("   ESP32 Omni Robot Controller");
   Serial.println("=================================\n");
+
+  Serial.println("TA6586 управление (по официальной таблице):");
+  Serial.println("  Вперёд: D0=HIGH/PWM, D1=LOW");
+  Serial.println("  Назад:  D0=LOW/PWM (инверсный), D1=HIGH");
+  Serial.println("  Холостой: D0=LOW, D1=LOW\n");
 
   // Загрузить конфигурацию из памяти
   loadConfig();
