@@ -829,15 +829,15 @@ const char index_html[] PROGMEM = R"rawliteral(
       <div class="joystick-layout">
         <!-- Левая половина: направления -->
         <div>
-          <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Направления</h3>
+          <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Движение</h3>
           <div class="control-grid">
             <div class="btn empty"></div>
             <button class="btn" ontouchstart="sendCommand('forward')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('forward')" onmouseup="sendCommand('stop')">⬆️</button>
             <div class="btn empty"></div>
 
-            <button class="btn" ontouchstart="sendCommand('left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('left')" onmouseup="sendCommand('stop')">⬅️</button>
+            <button class="btn" ontouchstart="sendCommand('rotate_left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('rotate_left')" onmouseup="sendCommand('stop')">⬅️</button>
             <button class="btn stop" onclick="sendCommand('stop')">⏹️</button>
-            <button class="btn" ontouchstart="sendCommand('right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('right')" onmouseup="sendCommand('stop')">➡️</button>
+            <button class="btn" ontouchstart="sendCommand('rotate_right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('rotate_right')" onmouseup="sendCommand('stop')">➡️</button>
 
             <div class="btn empty"></div>
             <button class="btn" ontouchstart="sendCommand('backward')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('backward')" onmouseup="sendCommand('stop')">⬇️</button>
@@ -845,12 +845,12 @@ const char index_html[] PROGMEM = R"rawliteral(
           </div>
         </div>
 
-        <!-- Правая половина: повороты -->
+        <!-- Правая половина: стрейф -->
         <div>
-          <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Повороты</h3>
+          <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Стрейф</h3>
           <div class="rotate-buttons">
-            <button class="btn" ontouchstart="sendCommand('rotate_left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('rotate_left')" onmouseup="sendCommand('stop')">⟲</button>
-            <button class="btn" ontouchstart="sendCommand('rotate_right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('rotate_right')" onmouseup="sendCommand('stop')">⟳</button>
+            <button class="btn" ontouchstart="sendCommand('left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('left')" onmouseup="sendCommand('stop')">⟲</button>
+            <button class="btn" ontouchstart="sendCommand('right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('right')" onmouseup="sendCommand('stop')">⟳</button>
           </div>
         </div>
       </div>
