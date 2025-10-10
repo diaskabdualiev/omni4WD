@@ -1,14 +1,8 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <ESPAsyncWebServer.h>
-#include <AsyncTCP.h>
+#include "ESP32Wiimote.h"
 #include <Preferences.h>
 
 // ==================== КОНФИГУРАЦИЯ ====================
-
-// WiFi настройки
-const char* ssid = "DiasPhone";
-const char* password = "diasdias";
 
 // Пины моторов (TA6586 драйверы)
 // Драйвер 1
@@ -35,8 +29,7 @@ const char* password = "diasdias";
 
 // ==================== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ====================
 
-AsyncWebServer server(80);
-AsyncWebSocket ws("/ws");
+ESP32Wiimote wiimote;
 Preferences preferences;
 
 // Текущая скорость (0-255)
@@ -48,6 +41,9 @@ int currentSpeed = 200;  // ~80% от 255
 // По умолчанию для X-конфигурации: M1↗ M2↖ M3↙ M4↘
 int motorMapping[4] = {1, 2, 3, 4};  // По умолчанию: прямое соответствие
 bool motorInvert[4] = {false, false, false, false};  // Инверсия направления
+
+// Состояние кнопок для детекции изменений
+uint16_t lastButtonState = 0;
 
 // ==================== ФУНКЦИИ РАБОТЫ С НАСТРОЙКАМИ ====================
 
@@ -78,50 +74,6 @@ void loadConfig() {
     if (i < 3) Serial.print(", ");
   }
   Serial.println("]");
-}
-
-void saveConfig() {
-  preferences.begin("robot", false);  // false = read-write
-
-  for (int i = 0; i < 4; i++) {
-    String key = "map" + String(i);
-    preferences.putInt(key.c_str(), motorMapping[i]);
-
-    key = "inv" + String(i);
-    preferences.putBool(key.c_str(), motorInvert[i]);
-  }
-
-  preferences.end();
-  Serial.println("✓ Конфигурация сохранена в EEPROM");
-}
-
-void resetConfig() {
-  motorMapping[0] = 1;
-  motorMapping[1] = 2;
-  motorMapping[2] = 3;
-  motorMapping[3] = 4;
-
-  motorInvert[0] = false;
-  motorInvert[1] = false;
-  motorInvert[2] = false;
-  motorInvert[3] = false;
-
-  Serial.println("✓ Конфигурация сброшена к дефолту");
-}
-
-String getConfigJSON() {
-  String json = "{\"mapping\":[";
-  for (int i = 0; i < 4; i++) {
-    json += String(motorMapping[i]);
-    if (i < 3) json += ",";
-  }
-  json += "],\"invert\":[";
-  for (int i = 0; i < 4; i++) {
-    json += motorInvert[i] ? "true" : "false";
-    if (i < 3) json += ",";
-  }
-  json += "]}";
-  return json;
 }
 
 // ==================== ФУНКЦИИ УПРАВЛЕНИЯ МОТОРАМИ ====================
@@ -251,1068 +203,110 @@ void rotateRight() {
   setMotor(4, -currentSpeed);
 }
 
-void moveDiagonalForwardLeft() {
-  setMotor(1, 0);
-  setMotor(2, currentSpeed);
-  setMotor(3, currentSpeed);
-  setMotor(4, 0);
-}
+// ==================== ОБРАБОТКА WIIMOTE ====================
 
-void moveDiagonalForwardRight() {
-  setMotor(1, currentSpeed);
-  setMotor(2, 0);
-  setMotor(3, 0);
-  setMotor(4, currentSpeed);
-}
+void handleWiimoteInput() {
+  if (wiimote.available() > 0) {
+    uint16_t button = wiimote.getButtonState();
 
-void moveDiagonalBackwardLeft() {
-  setMotor(1, -currentSpeed);
-  setMotor(2, 0);
-  setMotor(3, 0);
-  setMotor(4, -currentSpeed);
-}
+    // Отладочный вывод при изменении состояния кнопок
+    if (button != lastButtonState) {
+      Serial.printf("Buttons: 0x%04x = ", (int)button);
 
-void moveDiagonalBackwardRight() {
-  setMotor(1, 0);
-  setMotor(2, -currentSpeed);
-  setMotor(3, -currentSpeed);
-  setMotor(4, 0);
-}
+      if (button & ESP32Wiimote::BUTTON_A)     Serial.print("A ");
+      if (button & ESP32Wiimote::BUTTON_B)     Serial.print("B ");
+      if (button & ESP32Wiimote::BUTTON_ONE)   Serial.print("1 ");
+      if (button & ESP32Wiimote::BUTTON_TWO)   Serial.print("2 ");
+      if (button & ESP32Wiimote::BUTTON_MINUS) Serial.print("- ");
+      if (button & ESP32Wiimote::BUTTON_PLUS)  Serial.print("+ ");
+      if (button & ESP32Wiimote::BUTTON_HOME)  Serial.print("HOME ");
+      if (button & ESP32Wiimote::BUTTON_LEFT)  Serial.print("< ");
+      if (button & ESP32Wiimote::BUTTON_RIGHT) Serial.print("> ");
+      if (button & ESP32Wiimote::BUTTON_UP)    Serial.print("^ ");
+      if (button & ESP32Wiimote::BUTTON_DOWN)  Serial.print("v ");
 
-// ==================== WEBSOCKET ОБРАБОТЧИКИ ====================
+      Serial.printf("| Speed: %d\n", currentSpeed);
+      lastButtonState = button;
+    }
 
-void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
-  AwsFrameInfo *info = (AwsFrameInfo*)arg;
-  if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
-    data[len] = 0;
-    String command = (char*)data;
+    // Приоритет: HOME (аварийная остановка) имеет наивысший приоритет
+    if (button & ESP32Wiimote::BUTTON_HOME) {
+      stopAllMotors();
+      Serial.println("🛑 АВАРИЙНАЯ ОСТАНОВКА!");
+      return;
+    }
 
-    Serial.println("Команда: " + command);
+    // Векторное сложение движений для комбинированного управления
+    // Позволяет нажимать несколько кнопок одновременно (например, вперёд + стрейф)
+    float motor1 = 0, motor2 = 0, motor3 = 0, motor4 = 0;
 
-    // Команды управления
-    if (command == "forward") {
-      moveForward();
-    } else if (command == "backward") {
-      moveBackward();
-    } else if (command == "left") {
-      moveLeft();
-    } else if (command == "right") {
-      moveRight();
-    } else if (command == "rotate_left") {
-      rotateLeft();
-    } else if (command == "rotate_right") {
-      rotateRight();
-    } else if (command == "diag_fl") {
-      moveDiagonalForwardLeft();
-    } else if (command == "diag_fr") {
-      moveDiagonalForwardRight();
-    } else if (command == "diag_bl") {
-      moveDiagonalBackwardLeft();
-    } else if (command == "diag_br") {
-      moveDiagonalBackwardRight();
-    } else if (command == "stop") {
+    // D-pad управление (для ГОРИЗОНТАЛЬНОГО положения Wiimote)
+    // X-конфигурация: M1↗ M2↖ M3↙ M4↘
+
+    // Вперёд/Назад
+    if (button & ESP32Wiimote::BUTTON_LEFT) {
+      // Вперёд: все моторы +1
+      motor1 += 1.0;
+      motor2 += 1.0;
+      motor3 += 1.0;
+      motor4 += 1.0;
+    }
+    if (button & ESP32Wiimote::BUTTON_RIGHT) {
+      // Назад: все моторы -1
+      motor1 -= 1.0;
+      motor2 -= 1.0;
+      motor3 -= 1.0;
+      motor4 -= 1.0;
+    }
+
+    // Поворот
+    if (button & ESP32Wiimote::BUTTON_UP) {
+      // Поворот влево: M1-, M2+, M3-, M4+
+      motor1 -= 1.0;
+      motor2 += 1.0;
+      motor3 -= 1.0;
+      motor4 += 1.0;
+    }
+    if (button & ESP32Wiimote::BUTTON_DOWN) {
+      // Поворот вправо: M1+, M2-, M3+, M4-
+      motor1 += 1.0;
+      motor2 -= 1.0;
+      motor3 += 1.0;
+      motor4 -= 1.0;
+    }
+
+    // Стрейф (кнопки A, B, 1, 2)
+    if ((button & ESP32Wiimote::BUTTON_A) || (button & ESP32Wiimote::BUTTON_TWO)) {
+      // Стрейф вправо: M1+, M2-, M3-, M4+
+      motor1 += 1.0;
+      motor2 -= 1.0;
+      motor3 -= 1.0;
+      motor4 += 1.0;
+    }
+    if ((button & ESP32Wiimote::BUTTON_B) || (button & ESP32Wiimote::BUTTON_ONE)) {
+      // Стрейф влево: M1-, M2+, M3+, M4-
+      motor1 -= 1.0;
+      motor2 += 1.0;
+      motor3 += 1.0;
+      motor4 -= 1.0;
+    }
+
+    // Нормализация и применение скорости
+    float maxVal = max(max(abs(motor1), abs(motor2)), max(abs(motor3), abs(motor4)));
+
+    if (maxVal > 0.01) {
+      // Есть движение - нормализуем и применяем currentSpeed
+      float scale = currentSpeed / maxVal;
+      setMotor(1, (int)(motor1 * scale));
+      setMotor(2, (int)(motor2 * scale));
+      setMotor(3, (int)(motor3 * scale));
+      setMotor(4, (int)(motor4 * scale));
+    } else {
+      // Ни одна кнопка движения не нажата - остановка
       stopAllMotors();
     }
-    // Команды калибровки - тест по ЛОГИЧЕСКОЙ позиции (с учетом маппинга)
-    else if (command.startsWith("test_")) {
-      int pos = command.substring(5, 6).toInt();  // test_0_fwd -> 0
-      String action = command.substring(7);       // fwd/bwd/stop
-
-      if (pos >= 0 && pos < 4) {
-        int logicalMotor = pos + 1;  // 0->1, 1->2, 2->3, 3->4
-        if (action == "fwd") {
-          setMotor(logicalMotor, currentSpeed);
-        } else if (action == "bwd") {
-          setMotor(logicalMotor, -currentSpeed);
-        } else if (action == "stop") {
-          setMotor(logicalMotor, 0);
-        }
-      }
-    }
-    // Изменение скорости
-    else if (command.startsWith("speed:")) {
-      int newSpeed = command.substring(6).toInt();
-      if (newSpeed >= 0 && newSpeed <= 255) {
-        currentSpeed = newSpeed;
-        Serial.println("Скорость изменена на: " + String(currentSpeed));
-      }
-    }
-    // Управление джойстиком: "joy:x:y" где x,y от -255 до 255
-    else if (command.startsWith("joy:")) {
-      int firstColon = command.indexOf(':', 4);
-      int joyX = command.substring(4, firstColon).toInt();
-      int joyY = command.substring(firstColon + 1).toInt();
-
-      // Джойстик управление: Y = forward/backward, X = rotation
-      // Комбинированное управление для омни-платформы
-      int m1 = constrain(joyY - joyX, -255, 255);
-      int m2 = constrain(joyY + joyX, -255, 255);
-      int m3 = constrain(joyY - joyX, -255, 255);
-      int m4 = constrain(joyY + joyX, -255, 255);
-
-      setMotor(1, m1);
-      setMotor(2, m2);
-      setMotor(3, m3);
-      setMotor(4, m4);
-    }
-    // Команды настройки
-    else if (command == "get_config") {
-      ws.textAll(getConfigJSON());
-    } else if (command == "save_config") {
-      saveConfig();
-      ws.textAll("{\"status\":\"saved\"}");
-    } else if (command == "reset_config") {
-      resetConfig();
-      ws.textAll(getConfigJSON());
-    }
-    // Установка маппинга: "set_map:0:2" = логическая_позиция:физический_мотор
-    else if (command.startsWith("set_map:")) {
-      int firstColon = command.indexOf(':', 8);
-      int logicalPos = command.substring(8, firstColon).toInt();
-      int physicalMotor = command.substring(firstColon + 1).toInt();
-
-      if (logicalPos >= 0 && logicalPos < 4 && physicalMotor >= 1 && physicalMotor <= 4) {
-        motorMapping[logicalPos] = physicalMotor;
-        Serial.printf("Маппинг установлен: позиция %d -> мотор %d\n", logicalPos, physicalMotor);
-      }
-    }
-    // Установка инверсии: "set_inv:0:true"
-    else if (command.startsWith("set_inv:")) {
-      int firstColon = command.indexOf(':', 8);
-      int logicalPos = command.substring(8, firstColon).toInt();
-      String value = command.substring(firstColon + 1);
-
-      if (logicalPos >= 0 && logicalPos < 4) {
-        motorInvert[logicalPos] = (value == "true");
-        Serial.printf("Инверсия установлена: позиция %d = %s\n", logicalPos, value.c_str());
-      }
-    }
   }
 }
-
-void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
-             void *arg, uint8_t *data, size_t len) {
-  switch (type) {
-    case WS_EVT_CONNECT:
-      Serial.printf("WebSocket клиент #%u подключен\n", client->id());
-      // Отправить текущую конфигурацию при подключении
-      client->text(getConfigJSON());
-      break;
-    case WS_EVT_DISCONNECT:
-      Serial.printf("WebSocket клиент #%u отключен\n", client->id());
-      stopAllMotors(); // Остановить при отключении
-      break;
-    case WS_EVT_DATA:
-      handleWebSocketMessage(arg, data, len);
-      break;
-    case WS_EVT_PONG:
-    case WS_EVT_ERROR:
-      break;
-  }
-}
-
-// ==================== HTML ИНТЕРФЕЙС ====================
-
-const char index_html[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Omni Robot Control</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #f8fafc;
-      min-height: 100vh;
-      padding: 20px;
-    }
-    .container {
-      max-width: 700px;
-      margin: 0 auto;
-      background: white;
-      border-radius: 12px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      border: 1px solid #e2e8f0;
-      overflow: hidden;
-    }
-    .header {
-      background: white;
-      border-bottom: 1px solid #e2e8f0;
-      padding: 20px;
-      text-align: center;
-    }
-    .header h1 {
-      font-size: 20px;
-      margin-bottom: 8px;
-      color: #0f172a;
-      font-weight: 600;
-    }
-    .status {
-      font-size: 13px;
-      font-weight: 500;
-    }
-    .status.connected { color: #10b981; }
-    .status.disconnected { color: #64748b; }
-
-    .tabs {
-      display: flex;
-      background: #f8fafc;
-      border-bottom: 1px solid #e2e8f0;
-    }
-    .tab {
-      flex: 1;
-      padding: 14px;
-      text-align: center;
-      cursor: pointer;
-      border: none;
-      background: none;
-      font-size: 14px;
-      font-weight: 500;
-      color: #64748b;
-      transition: all 0.2s;
-    }
-    .tab.active {
-      background: white;
-      color: #3b82f6;
-      border-bottom: 2px solid #3b82f6;
-    }
-
-    .mode-btn {
-      padding: 10px 20px;
-      border: none;
-      background: transparent;
-      color: #64748b;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      border-radius: 6px;
-      transition: all 0.2s;
-    }
-    .mode-btn.active {
-      background: white;
-      color: #3b82f6;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-
-    .tab-content {
-      display: none;
-      padding: 30px 20px;
-      max-height: 75vh;
-      overflow-y: auto;
-    }
-    .tab-content.active {
-      display: block;
-    }
-
-    .speed-control {
-      margin-bottom: 20px;
-      text-align: center;
-    }
-    .speed-control label {
-      display: block;
-      font-size: 14px;
-      font-weight: 500;
-      margin-bottom: 10px;
-      color: #475569;
-    }
-    .speed-slider {
-      width: 100%;
-      margin: 10px 0;
-      height: 6px;
-      border-radius: 3px;
-      background: #e2e8f0;
-      outline: none;
-      -webkit-appearance: none;
-    }
-    .speed-slider::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      background: #3b82f6;
-      cursor: pointer;
-      border: 2px solid white;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-    }
-    .speed-slider::-moz-range-thumb {
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      background: #3b82f6;
-      cursor: pointer;
-      border: 2px solid white;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-    }
-    .speed-value {
-      font-size: 28px;
-      font-weight: 600;
-      color: #3b82f6;
-    }
-
-    .joystick-layout {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 15px;
-      margin-bottom: 20px;
-    }
-
-    .control-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
-    }
-    .btn {
-      padding: 20px;
-      font-size: 24px;
-      border: 1px solid #e2e8f0;
-      border-radius: 8px;
-      cursor: pointer;
-      background: white;
-      color: #3b82f6;
-      transition: all 0.15s;
-      user-select: none;
-      -webkit-user-select: none;
-      -webkit-touch-callout: none;
-      font-weight: 500;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    }
-    .btn:active {
-      transform: scale(0.98);
-      background: #eff6ff;
-      border-color: #3b82f6;
-    }
-    .btn.empty {
-      background: transparent;
-      cursor: default;
-      border: none;
-      box-shadow: none;
-    }
-    .btn.stop {
-      background: #ef4444;
-      color: white;
-      border-color: #ef4444;
-      grid-column: 2;
-    }
-    .btn.stop:active {
-      background: #dc2626;
-      border-color: #dc2626;
-    }
-
-    .rotate-buttons {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      height: 100%;
-    }
-
-    .rotate-buttons .btn {
-      font-size: 18px;
-    }
-
-    .emergency-stop {
-      width: 100%;
-      padding: 18px;
-      font-size: 16px;
-      font-weight: 600;
-      background: #ef4444;
-      color: white;
-      border: 1px solid #ef4444;
-      border-radius: 8px;
-      cursor: pointer;
-      margin-top: 20px;
-      box-shadow: 0 1px 3px rgba(239,68,68,0.3);
-      transition: all 0.15s;
-    }
-    .emergency-stop:active {
-      background: #dc2626;
-      border-color: #dc2626;
-      transform: scale(0.98);
-    }
-
-    /* Калибровка - визуальный квадрат */
-    .info-box {
-      background: #f0f9ff;
-      border: 1px solid #bae6fd;
-      padding: 14px;
-      margin-bottom: 20px;
-      border-radius: 8px;
-    }
-    .info-box p {
-      font-size: 13px;
-      color: #0369a1;
-      line-height: 1.6;
-      margin-bottom: 6px;
-    }
-    .info-box p:last-child {
-      margin-bottom: 0;
-    }
-
-    .robot-visual {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 15px;
-      margin-bottom: 24px;
-      padding: 16px;
-      background: #f8fafc;
-      border-radius: 8px;
-      border: 1px solid #e2e8f0;
-    }
-
-    .motor-corner {
-      background: white;
-      border-radius: 8px;
-      padding: 14px;
-      border: 1px solid #e2e8f0;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    }
-
-    .corner-header {
-      text-align: center;
-      margin-bottom: 12px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid #e2e8f0;
-    }
-
-    .corner-header h3 {
-      font-size: 13px;
-      color: #475569;
-      margin-bottom: 4px;
-      font-weight: 500;
-    }
-
-    .corner-header .icon {
-      font-size: 24px;
-      margin-bottom: 4px;
-    }
-
-    .test-controls {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 6px;
-      margin-bottom: 12px;
-    }
-
-    .test-controls .btn {
-      padding: 10px 6px;
-      font-size: 16px;
-    }
-
-    .btn.forward {
-      background: white;
-      color: #10b981;
-      border-color: #d1fae5;
-    }
-    .btn.forward:active {
-      background: #f0fdf4;
-      border-color: #10b981;
-    }
-    .btn.backward {
-      background: white;
-      color: #f59e0b;
-      border-color: #fed7aa;
-    }
-    .btn.backward:active {
-      background: #fffbeb;
-      border-color: #f59e0b;
-    }
-    .btn.test-stop {
-      background: #ef4444;
-      color: white;
-      border-color: #ef4444;
-    }
-    .btn.test-stop:active {
-      background: #dc2626;
-      border-color: #dc2626;
-    }
-
-    .corner-settings {
-      margin-top: 10px;
-    }
-
-    .setting-item {
-      margin-bottom: 8px;
-    }
-
-    .setting-item label {
-      display: block;
-      font-size: 12px;
-      color: #64748b;
-      margin-bottom: 4px;
-      font-weight: 500;
-    }
-
-    .setting-item select {
-      width: 100%;
-      padding: 8px;
-      border: 1px solid #e2e8f0;
-      border-radius: 6px;
-      font-size: 13px;
-      background: white;
-      color: #475569;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-
-    .setting-item select:focus {
-      outline: none;
-      border-color: #3b82f6;
-      box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
-    }
-
-    .invert-check {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 8px;
-      background: #f8fafc;
-      border-radius: 6px;
-      border: 1px solid #e2e8f0;
-    }
-
-    .invert-check input[type="checkbox"] {
-      width: 16px;
-      height: 16px;
-      margin-right: 8px;
-      cursor: pointer;
-      accent-color: #3b82f6;
-    }
-
-    .invert-check label {
-      font-size: 12px;
-      color: #475569;
-      cursor: pointer;
-      margin: 0;
-      font-weight: 500;
-    }
-
-    .action-buttons {
-      display: grid;
-      grid-template-columns: 2fr 1fr;
-      gap: 10px;
-      margin-top: 20px;
-    }
-
-    .action-buttons .btn {
-      padding: 14px;
-      font-size: 14px;
-    }
-
-    .btn.save {
-      background: #3b82f6;
-      color: white;
-      border-color: #3b82f6;
-    }
-    .btn.save:active {
-      background: #2563eb;
-      border-color: #2563eb;
-    }
-    .btn.reset {
-      background: white;
-      color: #ef4444;
-      border-color: #fecaca;
-    }
-    .btn.reset:active {
-      background: #fef2f2;
-      border-color: #ef4444;
-    }
-
-    @media (max-width: 600px) {
-      .robot-visual {
-        gap: 15px;
-        padding: 15px;
-      }
-      .motor-corner {
-        padding: 12px;
-      }
-      .corner-header .icon {
-        font-size: 24px;
-      }
-      .test-controls .btn {
-        padding: 10px 5px;
-        font-size: 12px;
-      }
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>🤖 Omni Robot Control</h1>
-      <div class="status" id="status">Подключение...</div>
-    </div>
-
-    <div class="tabs">
-      <button class="tab active" onclick="switchTab(0)">Управление</button>
-      <button class="tab" onclick="switchTab(1)">Калибровка</button>
-    </div>
-
-    <!-- Вкладка 1: Управление -->
-    <div class="tab-content active" id="tab-control">
-      <!-- Переключатель режимов -->
-      <div style="text-align:center; margin-bottom:20px;">
-        <div style="display:inline-flex; background:#f1f5f9; border-radius:8px; padding:4px;">
-          <button id="modeJoystick" class="mode-btn active" onclick="switchMode('joystick')">🕹️ Джойстик</button>
-          <button id="modeButtons" class="mode-btn" onclick="switchMode('buttons')">🎮 Кнопки</button>
-        </div>
-      </div>
-
-      <div class="speed-control">
-        <label>Скорость</label>
-        <input type="range" class="speed-slider" min="0" max="255" value="200" id="speedSlider" oninput="updateSpeed()">
-        <div class="speed-value" id="speedValue">200</div>
-      </div>
-
-      <!-- Режим джойстика -->
-      <div id="joystick-mode" class="control-mode">
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:20px;">
-          <!-- Джойстик слева -->
-          <div>
-            <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Джойстик</h3>
-            <div style="position:relative; width:100%; padding-bottom:100%; background:#f8fafc; border-radius:12px; border:2px solid #e2e8f0;">
-              <canvas id="joystickCanvas" style="position:absolute; width:100%; height:100%; touch-action:none;"></canvas>
-            </div>
-          </div>
-
-          <!-- Стрейф справа -->
-          <div>
-            <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Стрейф</h3>
-            <div class="rotate-buttons">
-              <button class="btn" ontouchstart="sendCommand('left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('left')" onmouseup="sendCommand('stop')">⟲</button>
-              <button class="btn" ontouchstart="sendCommand('right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('right')" onmouseup="sendCommand('stop')">⟳</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Режим кнопок -->
-      <div id="buttons-mode" class="control-mode" style="display:none;">
-        <div class="joystick-layout">
-        <!-- Левая половина: направления -->
-        <div>
-          <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Движение</h3>
-          <div class="control-grid">
-            <div class="btn empty"></div>
-            <button class="btn" ontouchstart="sendCommand('forward')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('forward')" onmouseup="sendCommand('stop')">⬆️</button>
-            <div class="btn empty"></div>
-
-            <button class="btn" ontouchstart="sendCommand('rotate_left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('rotate_left')" onmouseup="sendCommand('stop')">⬅️</button>
-            <button class="btn stop" onclick="sendCommand('stop')">⏹️</button>
-            <button class="btn" ontouchstart="sendCommand('rotate_right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('rotate_right')" onmouseup="sendCommand('stop')">➡️</button>
-
-            <div class="btn empty"></div>
-            <button class="btn" ontouchstart="sendCommand('backward')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('backward')" onmouseup="sendCommand('stop')">⬇️</button>
-            <div class="btn empty"></div>
-          </div>
-        </div>
-
-        <!-- Правая половина: стрейф -->
-        <div>
-          <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Стрейф</h3>
-          <div class="rotate-buttons">
-            <button class="btn" ontouchstart="sendCommand('left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('left')" onmouseup="sendCommand('stop')">⟲</button>
-            <button class="btn" ontouchstart="sendCommand('right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('right')" onmouseup="sendCommand('stop')">⟳</button>
-          </div>
-        </div>
-      </div>
-      </div>
-
-      <button class="emergency-stop" onclick="sendCommand('stop')">🛑 АВАРИЙНЫЙ СТОП</button>
-    </div>
-
-    <!-- Вкладка 2: Калибровка -->
-    <div class="tab-content" id="tab-calibration">
-      <div class="speed-control">
-        <label>Скорость тестирования</label>
-        <input type="range" class="speed-slider" min="0" max="255" value="200" id="speedSlider2" oninput="updateSpeed2()">
-        <div class="speed-value" id="speedValue2">200</div>
-      </div>
-
-      <div class="info-box">
-        <p><strong>Инструкция:</strong></p>
-        <p>1. Нажми кнопки теста для каждого угла</p>
-        <p>2. Выбери правильный физический мотор из списка</p>
-        <p>3. Поставь галочку "Реверс" если мотор крутится наоборот</p>
-        <p>4. Нажми "Сохранить" когда все настроено</p>
-      </div>
-
-      <div class="robot-visual">
-        <!-- Передний-левый (M2) -->
-        <div class="motor-corner">
-          <div class="corner-header">
-            <div class="icon">↖️</div>
-            <h3>Передний-левый</h3>
-          </div>
-          <div class="test-controls">
-            <button class="btn forward" ontouchstart="sendCommand('test_1_fwd')" ontouchend="sendCommand('test_1_stop')" onmousedown="sendCommand('test_1_fwd')" onmouseup="sendCommand('test_1_stop')">⬆️</button>
-            <button class="btn test-stop" onclick="sendCommand('test_1_stop')">⏹️</button>
-            <button class="btn backward" ontouchstart="sendCommand('test_1_bwd')" ontouchend="sendCommand('test_1_stop')" onmousedown="sendCommand('test_1_bwd')" onmouseup="sendCommand('test_1_stop')">⬇️</button>
-          </div>
-          <div class="corner-settings">
-            <div class="setting-item">
-              <label>Физический мотор:</label>
-              <select id="map1" onchange="updateMapping(1)">
-                <option value="1">Мотор 1 (32,33)</option>
-                <option value="2">Мотор 2 (25,26)</option>
-                <option value="3">Мотор 3 (19,18)</option>
-                <option value="4">Мотор 4 (17,16)</option>
-              </select>
-            </div>
-            <div class="invert-check">
-              <input type="checkbox" id="inv1" onchange="updateInvert(1)">
-              <label for="inv1">Реверс</label>
-            </div>
-          </div>
-        </div>
-
-        <!-- Передний-правый (M1) -->
-        <div class="motor-corner">
-          <div class="corner-header">
-            <div class="icon">↗️</div>
-            <h3>Передний-правый</h3>
-          </div>
-          <div class="test-controls">
-            <button class="btn forward" ontouchstart="sendCommand('test_0_fwd')" ontouchend="sendCommand('test_0_stop')" onmousedown="sendCommand('test_0_fwd')" onmouseup="sendCommand('test_0_stop')">⬆️</button>
-            <button class="btn test-stop" onclick="sendCommand('test_0_stop')">⏹️</button>
-            <button class="btn backward" ontouchstart="sendCommand('test_0_bwd')" ontouchend="sendCommand('test_0_stop')" onmousedown="sendCommand('test_0_bwd')" onmouseup="sendCommand('test_0_stop')">⬇️</button>
-          </div>
-          <div class="corner-settings">
-            <div class="setting-item">
-              <label>Физический мотор:</label>
-              <select id="map0" onchange="updateMapping(0)">
-                <option value="1">Мотор 1 (32,33)</option>
-                <option value="2">Мотор 2 (25,26)</option>
-                <option value="3">Мотор 3 (19,18)</option>
-                <option value="4">Мотор 4 (17,16)</option>
-              </select>
-            </div>
-            <div class="invert-check">
-              <input type="checkbox" id="inv0" onchange="updateInvert(0)">
-              <label for="inv0">Реверс</label>
-            </div>
-          </div>
-        </div>
-
-        <!-- Задний-левый (M3) -->
-        <div class="motor-corner">
-          <div class="corner-header">
-            <div class="icon">↙️</div>
-            <h3>Задний-левый</h3>
-          </div>
-          <div class="test-controls">
-            <button class="btn forward" ontouchstart="sendCommand('test_2_fwd')" ontouchend="sendCommand('test_2_stop')" onmousedown="sendCommand('test_2_fwd')" onmouseup="sendCommand('test_2_stop')">⬆️</button>
-            <button class="btn test-stop" onclick="sendCommand('test_2_stop')">⏹️</button>
-            <button class="btn backward" ontouchstart="sendCommand('test_2_bwd')" ontouchend="sendCommand('test_2_stop')" onmousedown="sendCommand('test_2_bwd')" onmouseup="sendCommand('test_2_stop')">⬇️</button>
-          </div>
-          <div class="corner-settings">
-            <div class="setting-item">
-              <label>Физический мотор:</label>
-              <select id="map2" onchange="updateMapping(2)">
-                <option value="1">Мотор 1 (32,33)</option>
-                <option value="2">Мотор 2 (25,26)</option>
-                <option value="3">Мотор 3 (19,18)</option>
-                <option value="4">Мотор 4 (17,16)</option>
-              </select>
-            </div>
-            <div class="invert-check">
-              <input type="checkbox" id="inv2" onchange="updateInvert(2)">
-              <label for="inv2">Реверс</label>
-            </div>
-          </div>
-        </div>
-
-        <!-- Задний-правый (M4) -->
-        <div class="motor-corner">
-          <div class="corner-header">
-            <div class="icon">↘️</div>
-            <h3>Задний-правый</h3>
-          </div>
-          <div class="test-controls">
-            <button class="btn forward" ontouchstart="sendCommand('test_3_fwd')" ontouchend="sendCommand('test_3_stop')" onmousedown="sendCommand('test_3_fwd')" onmouseup="sendCommand('test_3_stop')">⬆️</button>
-            <button class="btn test-stop" onclick="sendCommand('test_3_stop')">⏹️</button>
-            <button class="btn backward" ontouchstart="sendCommand('test_3_bwd')" ontouchend="sendCommand('test_3_stop')" onmousedown="sendCommand('test_3_bwd')" onmouseup="sendCommand('test_3_stop')">⬇️</button>
-          </div>
-          <div class="corner-settings">
-            <div class="setting-item">
-              <label>Физический мотор:</label>
-              <select id="map3" onchange="updateMapping(3)">
-                <option value="1">Мотор 1 (32,33)</option>
-                <option value="2">Мотор 2 (25,26)</option>
-                <option value="3">Мотор 3 (19,18)</option>
-                <option value="4">Мотор 4 (17,16)</option>
-              </select>
-            </div>
-            <div class="invert-check">
-              <input type="checkbox" id="inv3" onchange="updateInvert(3)">
-              <label for="inv3">Реверс</label>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="action-buttons">
-        <button class="btn save" onclick="saveSettings()">💾 Сохранить настройки</button>
-        <button class="btn reset" onclick="resetSettings()">🔄 Сброс</button>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    let ws;
-    const statusEl = document.getElementById('status');
-
-    function initWebSocket() {
-      ws = new WebSocket('ws://' + window.location.hostname + '/ws');
-
-      ws.onopen = function() {
-        statusEl.textContent = '✓ Подключено';
-        statusEl.className = 'status connected';
-        sendCommand('get_config');
-      };
-
-      ws.onclose = function() {
-        statusEl.textContent = '✗ Отключено';
-        statusEl.className = 'status disconnected';
-        setTimeout(initWebSocket, 2000);
-      };
-
-      ws.onerror = function() {
-        statusEl.textContent = '✗ Ошибка подключения';
-        statusEl.className = 'status disconnected';
-      };
-
-      ws.onmessage = function(event) {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.mapping && data.invert) {
-            loadConfigToUI(data);
-          } else if (data.status === 'saved') {
-            alert('💾 Настройки сохранены в память ESP32!');
-          }
-        } catch (e) {
-          console.log('Получено сообщение:', event.data);
-        }
-      };
-    }
-
-    function sendCommand(cmd) {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(cmd);
-      }
-    }
-
-    function updateSpeed() {
-      const speed = document.getElementById('speedSlider').value;
-      document.getElementById('speedValue').textContent = speed;
-      document.getElementById('speedSlider2').value = speed;
-      document.getElementById('speedValue2').textContent = speed;
-      sendCommand('speed:' + speed);
-    }
-
-    function updateSpeed2() {
-      const speed = document.getElementById('speedSlider2').value;
-      document.getElementById('speedValue2').textContent = speed;
-      document.getElementById('speedSlider').value = speed;
-      document.getElementById('speedValue').textContent = speed;
-      sendCommand('speed:' + speed);
-    }
-
-    function switchTab(index) {
-      const tabs = document.querySelectorAll('.tab');
-      const contents = document.querySelectorAll('.tab-content');
-
-      tabs.forEach((tab, i) => {
-        tab.classList.toggle('active', i === index);
-      });
-
-      contents.forEach((content, i) => {
-        content.classList.toggle('active', i === index);
-      });
-
-      sendCommand('stop');
-    }
-
-    function loadConfigToUI(config) {
-      for (let i = 0; i < 4; i++) {
-        document.getElementById('map' + i).value = config.mapping[i];
-        document.getElementById('inv' + i).checked = config.invert[i];
-      }
-    }
-
-    function updateMapping(pos) {
-      const value = document.getElementById('map' + pos).value;
-      sendCommand('set_map:' + pos + ':' + value);
-    }
-
-    function updateInvert(pos) {
-      const value = document.getElementById('inv' + pos).checked;
-      sendCommand('set_inv:' + pos + ':' + value);
-    }
-
-    function saveSettings() {
-      // Применить все текущие настройки
-      for (let i = 0; i < 4; i++) {
-        updateMapping(i);
-        updateInvert(i);
-      }
-      // Сохранить в EEPROM
-      sendCommand('save_config');
-    }
-
-    function resetSettings() {
-      if (confirm('Сбросить все настройки к дефолту?')) {
-        sendCommand('reset_config');
-        alert('🔄 Настройки сброшены! Не забудь сохранить.');
-      }
-    }
-
-    document.addEventListener('selectstart', function(e) {
-      e.preventDefault();
-    });
-
-    // ========== ДЖОЙСТИК ==========
-    let joystickActive = false;
-    let joystickX = 0;
-    let joystickY = 0;
-
-    function initJoystick() {
-      const canvas = document.getElementById('joystickCanvas');
-      if (!canvas) return;
-
-      const ctx = canvas.getContext('2d');
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width;
-      canvas.height = rect.height;
-
-      const centerX = canvas.width / 2;
-      const centerY = canvas.height / 2;
-      const maxRadius = Math.min(canvas.width, canvas.height) / 2 - 20;
-
-      function drawJoystick() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Внешний круг
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, maxRadius, 0, 2 * Math.PI);
-        ctx.strokeStyle = '#e2e8f0';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Центр
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, 5, 0, 2 * Math.PI);
-        ctx.fillStyle = '#cbd5e1';
-        ctx.fill();
-
-        // Стик
-        const stickX = centerX + joystickX * maxRadius / 255;
-        const stickY = centerY + joystickY * maxRadius / 255;
-        ctx.beginPath();
-        ctx.arc(stickX, stickY, 30, 0, 2 * Math.PI);
-        ctx.fillStyle = joystickActive ? '#3b82f6' : '#94a3b8';
-        ctx.fill();
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-      }
-
-      function handleMove(clientX, clientY) {
-        const rect = canvas.getBoundingClientRect();
-        const x = clientX - rect.left - centerX;
-        const y = clientY - rect.top - centerY;
-
-        const distance = Math.sqrt(x * x + y * y);
-        const angle = Math.atan2(y, x);
-
-        const clampedDistance = Math.min(distance, maxRadius);
-
-        joystickX = Math.round((clampedDistance * Math.cos(angle) / maxRadius) * 255);
-        joystickY = -Math.round((clampedDistance * Math.sin(angle) / maxRadius) * 255);  // Инвертируем Y
-
-        drawJoystick();
-        sendCommand('joy:' + joystickX + ':' + joystickY);
-      }
-
-      function handleEnd() {
-        joystickActive = false;
-        joystickX = 0;
-        joystickY = 0;
-        drawJoystick();
-        sendCommand('stop');
-      }
-
-      // Touch events
-      canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        joystickActive = true;
-        handleMove(e.touches[0].clientX, e.touches[0].clientY);
-      });
-
-      canvas.addEventListener('touchmove', (e) => {
-        e.preventDefault();
-        if (joystickActive) {
-          handleMove(e.touches[0].clientX, e.touches[0].clientY);
-        }
-      });
-
-      canvas.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        handleEnd();
-      });
-
-      // Mouse events
-      canvas.addEventListener('mousedown', (e) => {
-        joystickActive = true;
-        handleMove(e.clientX, e.clientY);
-      });
-
-      canvas.addEventListener('mousemove', (e) => {
-        if (joystickActive) {
-          handleMove(e.clientX, e.clientY);
-        }
-      });
-
-      canvas.addEventListener('mouseup', handleEnd);
-      canvas.addEventListener('mouseleave', handleEnd);
-
-      drawJoystick();
-    }
-
-    // ========== ПЕРЕКЛЮЧЕНИЕ РЕЖИМОВ ==========
-    function switchMode(mode) {
-      const joystickMode = document.getElementById('joystick-mode');
-      const buttonsMode = document.getElementById('buttons-mode');
-      const btnJoystick = document.getElementById('modeJoystick');
-      const btnButtons = document.getElementById('modeButtons');
-
-      if (mode === 'joystick') {
-        joystickMode.style.display = 'block';
-        buttonsMode.style.display = 'none';
-        btnJoystick.classList.add('active');
-        btnButtons.classList.remove('active');
-        setTimeout(initJoystick, 100);
-      } else {
-        joystickMode.style.display = 'none';
-        buttonsMode.style.display = 'block';
-        btnJoystick.classList.remove('active');
-        btnButtons.classList.add('active');
-      }
-    }
-
-    initWebSocket();
-    setTimeout(() => {
-      initJoystick();
-    }, 500);
-  </script>
-</body>
-</html>
-)rawliteral";
 
 // ==================== SETUP ====================
 
@@ -1322,6 +316,7 @@ void setup() {
 
   Serial.println("\n\n=================================");
   Serial.println("   ESP32 Omni Robot Controller");
+  Serial.println("   Nintendo Wii Remote Edition");
   Serial.println("=================================\n");
 
   Serial.println("TA6586 управление (по официальной таблице):");
@@ -1354,49 +349,32 @@ void setup() {
 
   Serial.println("✓ Моторы инициализированы");
 
-  // Подключение к WiFi
-  Serial.print("Подключение к WiFi: ");
-  Serial.println(ssid);
-
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-    delay(500);
-    Serial.print(".");
-    attempts++;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n✓ WiFi подключен!");
-    Serial.print("IP адрес: ");
-    Serial.println(WiFi.localIP());
-    Serial.print("Открой в браузере: http://");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("\n✗ Не удалось подключиться к WiFi");
-    Serial.println("Проверь SSID и пароль");
-  }
-
-  // Настройка WebSocket
-  ws.onEvent(onEvent);
-  server.addHandler(&ws);
-
-  // Главная страница
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "text/html", index_html);
-  });
-
-  // Запуск сервера
-  server.begin();
-  Serial.println("✓ Веб-сервер запущен\n");
+  // Инициализация Wiimote
+  Serial.println("\nИнициализация Wii Remote...");
+  wiimote.init();
+  Serial.println("✓ Wiimote инициализирован");
+  Serial.println("\n=================================");
+  Serial.println("Нажми 1+2 на Wiimote для подключения");
   Serial.println("=================================\n");
+  Serial.println("Управление (Wiimote в ГОРИЗОНТАЛЬНОМ положении):");
+  Serial.println("  D-pad ←   = Вперёд");
+  Serial.println("  D-pad →   = Назад");
+  Serial.println("  D-pad ↑   = Поворот влево");
+  Serial.println("  D-pad ↓   = Поворот вправо");
+  Serial.println("  Кнопка A  = Стрейф вправо");
+  Serial.println("  Кнопка B  = Стрейф влево");
+  Serial.println("  Кнопка 1  = Стрейф влево (дублирует B)");
+  Serial.println("  Кнопка 2  = Стрейф вправо (дублирует A)");
+  Serial.println("  Кнопка HOME = АВАРИЙНАЯ ОСТАНОВКА");
+  Serial.println("\n✨ Можно нажимать несколько кнопок одновременно!");
+  Serial.println("   Например: ← + A = движение по диагонали");
+  Serial.println("\n=================================\n");
 }
 
 // ==================== LOOP ====================
 
 void loop() {
-  ws.cleanupClients();
+  wiimote.task();
+  handleWiimoteInput();
   delay(10);
 }
