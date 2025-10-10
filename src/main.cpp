@@ -337,6 +337,24 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
         Serial.println("Скорость изменена на: " + String(currentSpeed));
       }
     }
+    // Управление джойстиком: "joy:x:y" где x,y от -255 до 255
+    else if (command.startsWith("joy:")) {
+      int firstColon = command.indexOf(':', 4);
+      int joyX = command.substring(4, firstColon).toInt();
+      int joyY = command.substring(firstColon + 1).toInt();
+
+      // Джойстик управление: Y = forward/backward, X = rotation
+      // Комбинированное управление для омни-платформы
+      int m1 = constrain(joyY - joyX, -255, 255);
+      int m2 = constrain(joyY + joyX, -255, 255);
+      int m3 = constrain(joyY - joyX, -255, 255);
+      int m4 = constrain(joyY + joyX, -255, 255);
+
+      setMotor(1, m1);
+      setMotor(2, m2);
+      setMotor(3, m3);
+      setMotor(4, m4);
+    }
     // Команды настройки
     else if (command == "get_config") {
       ws.textAll(getConfigJSON());
@@ -463,6 +481,23 @@ const char index_html[] PROGMEM = R"rawliteral(
       background: white;
       color: #3b82f6;
       border-bottom: 2px solid #3b82f6;
+    }
+
+    .mode-btn {
+      padding: 10px 20px;
+      border: none;
+      background: transparent;
+      color: #64748b;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+    .mode-btn.active {
+      background: white;
+      color: #3b82f6;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
 
     .tab-content {
@@ -820,13 +855,45 @@ const char index_html[] PROGMEM = R"rawliteral(
 
     <!-- Вкладка 1: Управление -->
     <div class="tab-content active" id="tab-control">
+      <!-- Переключатель режимов -->
+      <div style="text-align:center; margin-bottom:20px;">
+        <div style="display:inline-flex; background:#f1f5f9; border-radius:8px; padding:4px;">
+          <button id="modeJoystick" class="mode-btn active" onclick="switchMode('joystick')">🕹️ Джойстик</button>
+          <button id="modeButtons" class="mode-btn" onclick="switchMode('buttons')">🎮 Кнопки</button>
+        </div>
+      </div>
+
       <div class="speed-control">
         <label>Скорость</label>
         <input type="range" class="speed-slider" min="0" max="255" value="200" id="speedSlider" oninput="updateSpeed()">
         <div class="speed-value" id="speedValue">200</div>
       </div>
 
-      <div class="joystick-layout">
+      <!-- Режим джойстика -->
+      <div id="joystick-mode" class="control-mode">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:20px;">
+          <!-- Джойстик слева -->
+          <div>
+            <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Джойстик</h3>
+            <div style="position:relative; width:100%; padding-bottom:100%; background:#f8fafc; border-radius:12px; border:2px solid #e2e8f0;">
+              <canvas id="joystickCanvas" style="position:absolute; width:100%; height:100%; touch-action:none;"></canvas>
+            </div>
+          </div>
+
+          <!-- Стрейф справа -->
+          <div>
+            <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Стрейф</h3>
+            <div class="rotate-buttons">
+              <button class="btn" ontouchstart="sendCommand('left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('left')" onmouseup="sendCommand('stop')">⟲</button>
+              <button class="btn" ontouchstart="sendCommand('right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('right')" onmouseup="sendCommand('stop')">⟳</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Режим кнопок -->
+      <div id="buttons-mode" class="control-mode" style="display:none;">
+        <div class="joystick-layout">
         <!-- Левая половина: направления -->
         <div>
           <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Движение</h3>
@@ -853,6 +920,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             <button class="btn" ontouchstart="sendCommand('right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('right')" onmouseup="sendCommand('stop')">⟳</button>
           </div>
         </div>
+      </div>
       </div>
 
       <button class="emergency-stop" onclick="sendCommand('stop')">🛑 АВАРИЙНЫЙ СТОП</button>
@@ -1108,7 +1176,139 @@ const char index_html[] PROGMEM = R"rawliteral(
       e.preventDefault();
     });
 
+    // ========== ДЖОЙСТИК ==========
+    let joystickActive = false;
+    let joystickX = 0;
+    let joystickY = 0;
+
+    function initJoystick() {
+      const canvas = document.getElementById('joystickCanvas');
+      if (!canvas) return;
+
+      const ctx = canvas.getContext('2d');
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      const maxRadius = Math.min(canvas.width, canvas.height) / 2 - 20;
+
+      function drawJoystick() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Внешний круг
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, maxRadius, 0, 2 * Math.PI);
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Центр
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, 5, 0, 2 * Math.PI);
+        ctx.fillStyle = '#cbd5e1';
+        ctx.fill();
+
+        // Стик
+        const stickX = centerX + joystickX * maxRadius / 255;
+        const stickY = centerY + joystickY * maxRadius / 255;
+        ctx.beginPath();
+        ctx.arc(stickX, stickY, 30, 0, 2 * Math.PI);
+        ctx.fillStyle = joystickActive ? '#3b82f6' : '#94a3b8';
+        ctx.fill();
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+
+      function handleMove(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        const x = clientX - rect.left - centerX;
+        const y = clientY - rect.top - centerY;
+
+        const distance = Math.sqrt(x * x + y * y);
+        const angle = Math.atan2(y, x);
+
+        const clampedDistance = Math.min(distance, maxRadius);
+
+        joystickX = Math.round((clampedDistance * Math.cos(angle) / maxRadius) * 255);
+        joystickY = -Math.round((clampedDistance * Math.sin(angle) / maxRadius) * 255);  // Инвертируем Y
+
+        drawJoystick();
+        sendCommand('joy:' + joystickX + ':' + joystickY);
+      }
+
+      function handleEnd() {
+        joystickActive = false;
+        joystickX = 0;
+        joystickY = 0;
+        drawJoystick();
+        sendCommand('stop');
+      }
+
+      // Touch events
+      canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        joystickActive = true;
+        handleMove(e.touches[0].clientX, e.touches[0].clientY);
+      });
+
+      canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (joystickActive) {
+          handleMove(e.touches[0].clientX, e.touches[0].clientY);
+        }
+      });
+
+      canvas.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        handleEnd();
+      });
+
+      // Mouse events
+      canvas.addEventListener('mousedown', (e) => {
+        joystickActive = true;
+        handleMove(e.clientX, e.clientY);
+      });
+
+      canvas.addEventListener('mousemove', (e) => {
+        if (joystickActive) {
+          handleMove(e.clientX, e.clientY);
+        }
+      });
+
+      canvas.addEventListener('mouseup', handleEnd);
+      canvas.addEventListener('mouseleave', handleEnd);
+
+      drawJoystick();
+    }
+
+    // ========== ПЕРЕКЛЮЧЕНИЕ РЕЖИМОВ ==========
+    function switchMode(mode) {
+      const joystickMode = document.getElementById('joystick-mode');
+      const buttonsMode = document.getElementById('buttons-mode');
+      const btnJoystick = document.getElementById('modeJoystick');
+      const btnButtons = document.getElementById('modeButtons');
+
+      if (mode === 'joystick') {
+        joystickMode.style.display = 'block';
+        buttonsMode.style.display = 'none';
+        btnJoystick.classList.add('active');
+        btnButtons.classList.remove('active');
+        setTimeout(initJoystick, 100);
+      } else {
+        joystickMode.style.display = 'none';
+        buttonsMode.style.display = 'block';
+        btnJoystick.classList.remove('active');
+        btnButtons.classList.add('active');
+      }
+    }
+
     initWebSocket();
+    setTimeout(() => {
+      initJoystick();
+    }, 500);
   </script>
 </body>
 </html>
