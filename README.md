@@ -1,20 +1,20 @@
-# ESP32 Omni Robot Controller
+# ESP32 Omni Robot Controller - Wii Remote Edition 🎮
 
-Web-based controller for 4-wheel omni-directional robot using ESP32 and TA6586 motor drivers.
+Nintendo Wii Remote controlled 4-wheel omni-directional robot using ESP32 and TA6586 motor drivers.
 
 ## Features
 
-- **Web Interface**: Control robot via WiFi from any device
-- **Two Control Modes**:
-  - 🕹️ **Joystick Mode**: Canvas-based joystick for smooth directional control
-  - 🎮 **Button Mode**: Grid buttons for precise movements
-- **Motor Calibration**: Interactive 2x2 grid for motor mapping and direction configuration
-- **Persistent Settings**: Motor configuration saved to ESP32 NVS (EEPROM)
-- **Omni-Directional Movement**: Forward, backward, strafe left/right, and rotation
+- **🎮 Nintendo Wii Remote Control**: Wireless control via Bluetooth
+- **Multi-Button Support**: Press multiple buttons simultaneously for diagonal/combined movements
+- **Omni-Directional Movement**: Forward, backward, strafe, rotation, and diagonal movements
+- **Vector-Based Control**: Smooth movement combining multiple inputs
+- **Persistent Motor Calibration**: Motor configuration loaded from ESP32 NVS (EEPROM)
+- **Emergency Stop**: Instant safety stop with HOME button
 
 ## Hardware Requirements
 
 - ESP32 Development Board (ESP32-DEVKIT)
+- Nintendo Wii Remote (Wiimote)
 - 4× DC Motors with omni wheels (X-configuration)
 - 2× TA6586 H-Bridge Motor Drivers
 - Power supply for motors
@@ -42,47 +42,56 @@ Web-based controller for 4-wheel omni-directional robot using ESP32 and TA6586 m
 
 - [PlatformIO](https://platformio.org/)
 - Libraries (auto-installed):
-  - ESPAsyncWebServer
-  - AsyncTCP
+  - [ESP32Wiimote](https://github.com/bigw00d/ESP32Wiimote)
   - ESP32 Arduino Core
+  - Preferences (EEPROM)
 
 ## Installation
 
 1. Clone this repository
-2. Update WiFi credentials in `src/main.cpp`:
-   ```cpp
-   const char* ssid = "YourWiFiSSID";
-   const char* password = "YourPassword";
-   ```
-3. Build and upload:
+2. Build and upload:
    ```bash
    pio run --target upload
    pio device monitor
    ```
-4. Connect to the web interface at the IP address shown in serial monitor
+3. Pair Wii Remote:
+   - Press **1 + 2** buttons simultaneously on Wiimote
+   - Wait for connection (LEDs will light up)
+   - Start controlling!
 
-## Usage
+## Controls
 
-### Control Tab
+### Wiimote Button Mapping (Horizontal Orientation)
 
-**Joystick Mode (Default):**
-- Drag the joystick circle to control movement and rotation
-- Left/Right movement on joystick = rotation
-- Up/Down movement = forward/backward
-- Use ⟲⟳ buttons for strafing left/right
+Hold your Wiimote **horizontally** like a TV remote:
 
-**Button Mode:**
-- ⬆️ Forward | ⬇️ Backward
-- ⬅️ Rotate Left | ➡️ Rotate Right
-- ⟲ Strafe Left | ⟳ Strafe Right
-- ⏹️ Emergency Stop
+**D-Pad Movement:**
+- **← (Left)** → Forward 🚗
+- **→ (Right)** → Backward 🔙
+- **↑ (Up)** → Rotate Left ↶
+- **↓ (Down)** → Rotate Right ↷
 
-### Calibration Tab
+**Strafe (Sideways) Movement:**
+- **A Button** → Strafe Right ➡️
+- **B Button** → Strafe Left ⬅️
+- **2 Button** → Strafe Right (same as A)
+- **1 Button** → Strafe Left (same as B)
 
-1. Test each motor corner using ⬆️⬇️ buttons
-2. Select the correct physical motor from dropdown
-3. Enable "Реверс" (Reverse) if motor spins wrong direction
-4. Click "💾 Сохранить настройки" to save to EEPROM
+**Emergency:**
+- **HOME Button** → 🛑 **EMERGENCY STOP**
+
+### Multi-Button Combinations
+
+You can press **multiple buttons at once** for advanced movements:
+
+- **← + A** = Diagonal forward-right ↗️
+- **← + B** = Diagonal forward-left ↖️
+- **→ + A** = Diagonal backward-right ↘️
+- **→ + B** = Diagonal backward-left ↙️
+- **← + ↑** = Forward while rotating left 🔄
+- **Any combination!** = Vector sum of all inputs
+
+The system automatically normalizes motor speeds to prevent overcurrent.
 
 ## Technical Details
 
@@ -98,7 +107,7 @@ The TA6586 has asymmetric control requiring special handling:
 - D0 = LOW/PWM (inverted PWM: `255 - speed`)
 - D1 = HIGH
 
-This is implemented in `setPhysicalMotor()` function.
+This is implemented in `setPhysicalMotor()` function at `src/main.cpp:82-129`.
 
 ### PWM Settings
 
@@ -106,20 +115,107 @@ This is implemented in `setPhysicalMotor()` function.
 - Resolution: 8-bit (0-255)
 - Default speed: 200 (~80%)
 
-### WebSocket Commands
+### Movement Algorithm
 
-- `forward`, `backward`, `left`, `right`, `rotate_left`, `rotate_right`, `stop`
-- `joy:X:Y` - Joystick control (X, Y: -255 to 255)
-- `speed:N` - Set speed (0-255)
-- `test_N_{fwd|bwd|stop}` - Test motor at position N (0-3)
-- `set_map:POS:MOTOR` - Map logical position to physical motor
-- `set_inv:POS:{true|false}` - Set motor direction inversion
-- `save_config` - Save configuration to EEPROM
+The robot uses **vector-based movement** (see `src/main.cpp:239-307`):
+
+1. Each button adds its contribution to motor speeds
+2. Forward: All motors +1
+3. Strafe Right: M1+, M2-, M3-, M4+
+4. Rotation: Opposite pairs
+5. Sum all inputs → Normalize to max speed → Apply to motors
+
+### Motor Calibration
+
+Motor mapping and direction inversion are loaded from EEPROM on startup. To recalibrate:
+1. Use the WiFi version on `main` branch for calibration UI
+2. Save configuration to EEPROM
+3. Switch back to `wiimote-control` branch
+4. Settings are preserved in EEPROM
+
+## Architecture
+
+```
+ESP32Wiimote Library
+       ↓
+Button State Detection (uint16_t bitmask)
+       ↓
+Vector Addition (float motor1-4)
+       ↓
+Normalization (scale to currentSpeed)
+       ↓
+Motor Mapping (logical → physical)
+       ↓
+Inversion (if configured)
+       ↓
+TA6586 Driver (asymmetric PWM)
+       ↓
+DC Motors (X-configuration)
+```
+
+## Troubleshooting
+
+**Wiimote won't connect:**
+- Ensure batteries are fresh
+- Press 1+2 within range (< 10m)
+- ESP32 Bluetooth must be enabled
+- Check Serial Monitor for connection status
+
+**Motors run wrong direction:**
+- Calibrate using WiFi version (`main` branch)
+- Or manually edit EEPROM in `loadConfig()` function
+
+**Robot moves diagonally instead of straight:**
+- Check motor calibration
+- Ensure all motors are same type/speed
+- Verify X-configuration wiring
+
+## Serial Monitor Output
+
+```
+=================================
+   ESP32 Omni Robot Controller
+   Nintendo Wii Remote Edition
+=================================
+
+Конфигурация загружена из EEPROM:
+  Маппинг: [1, 2, 3, 4]
+  Инверсия: [0, 0, 0, 0]
+
+✓ Моторы инициализированы
+✓ Wiimote инициализирован
+
+=================================
+Нажми 1+2 на Wiimote для подключения
+=================================
+
+Управление (Wiimote в ГОРИЗОНТАЛЬНОМ положении):
+  D-pad ←   = Вперёд
+  D-pad →   = Назад
+  ...
+```
+
+## Branch Information
+
+This is the **`wiimote-control`** branch:
+- **Control Method**: Nintendo Wii Remote via Bluetooth
+- **No WiFi required**
+- **No web interface**
+
+For the **WiFi web interface version**, see the `main` branch:
+```bash
+git checkout main
+```
 
 ## License
 
 MIT
 
-## Author
+## Credits
 
-Created for omni-directional robot platform with ESP32 and TA6586 drivers.
+- ESP32Wiimote library by [bigw00d](https://github.com/bigw00d/ESP32Wiimote)
+- Built with PlatformIO and ESP32 Arduino Core
+
+---
+
+**Created for omni-directional robot platform with ESP32, TA6586 drivers, and Nintendo Wii Remote** 🤖🎮
