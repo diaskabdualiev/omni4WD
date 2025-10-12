@@ -1,6 +1,19 @@
 #include <Arduino.h>
-#include "ESP32Wiimote.h"
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 #include <Preferences.h>
+#include <ArduinoJson.h>
+
+// ==================== BLE UUIDs ====================
+
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHAR_UUID_COMMAND   "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define CHAR_UUID_JOYSTICK  "ca73b3ba-39f6-4ab3-91ae-186dc9577d99"
+#define CHAR_UUID_SPEED     "1c95d5e3-d8f7-413a-bf3d-7a2e5d7be87e"
+#define CHAR_UUID_CONFIG    "d4e1f1a2-8b5c-4d3e-9f7a-6c8b5a4d3e2f"
+#define CHAR_UUID_TEST      "a3b2c1d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d"
 
 // ==================== КОНФИГУРАЦИЯ ====================
 
@@ -12,14 +25,14 @@
 #define MOTOR2_D1 26  // Направление (LOW/HIGH)
 
 // Драйвер 2
-#define MOTOR3_D0 19  // PWM для вперед
-#define MOTOR3_D1 18  // Направление (LOW/HIGH)
-#define MOTOR4_D0 17  // PWM для вперед
-#define MOTOR4_D1 16  // Направление (LOW/HIGH)
+#define MOTOR3_D0 19
+#define MOTOR3_D1 18
+#define MOTOR4_D0 17
+#define MOTOR4_D1 16
 
 // PWM настройки
-#define PWM_FREQ 5000      // 5 кГц
-#define PWM_RESOLUTION 8   // 8 бит (0-255)
+#define PWM_FREQ 5000
+#define PWM_RES 8
 
 // PWM каналы для каждого мотора
 #define PWM_CHANNEL_M1 0
@@ -29,39 +42,39 @@
 
 // ==================== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ====================
 
-ESP32Wiimote wiimote;
+BLEServer* pServer = NULL;
+BLECharacteristic* pCharCommand = NULL;
+BLECharacteristic* pCharJoystick = NULL;
+BLECharacteristic* pCharSpeed = NULL;
+BLECharacteristic* pCharConfig = NULL;
+BLECharacteristic* pCharTest = NULL;
+
+bool deviceConnected = false;
 Preferences preferences;
 
 // Текущая скорость (0-255)
-int currentSpeed = 200;  // ~80% от 255
+int currentSpeed = 200;
 
 // Конфигурация моторов
-// motorMapping[логическая_позиция] = физический_мотор
-// Логические позиции: 0=передний-правый, 1=передний-левый, 2=задний-левый, 3=задний-правый
-// По умолчанию для X-конфигурации: M1↗ M2↖ M3↙ M4↘
-int motorMapping[4] = {1, 2, 3, 4};  // По умолчанию: прямое соответствие
-bool motorInvert[4] = {false, false, false, false};  // Инверсия направления
-
-// Состояние кнопок для детекции изменений
-uint16_t lastButtonState = 0;
+int motorMapping[4] = {1, 2, 3, 4};
+bool motorInvert[4] = {false, false, false, false};
 
 // ==================== ФУНКЦИИ РАБОТЫ С НАСТРОЙКАМИ ====================
 
 void loadConfig() {
-  preferences.begin("robot", true);  // true = read-only
+  preferences.begin("robot", true);
 
-  // Загрузка маппинга моторов
   for (int i = 0; i < 4; i++) {
     String key = "map" + String(i);
-    motorMapping[i] = preferences.getInt(key.c_str(), i + 1);  // По умолчанию 1,2,3,4
+    motorMapping[i] = preferences.getInt(key.c_str(), i + 1);
 
     key = "inv" + String(i);
-    motorInvert[i] = preferences.getBool(key.c_str(), false);  // По умолчанию не инвертировано
+    motorInvert[i] = preferences.getBool(key.c_str(), false);
   }
 
   preferences.end();
 
-  Serial.println("\nКонфигурация загружена из EEPROM:");
+  Serial.println("✓ Конфигурация загружена:");
   Serial.print("  Маппинг: [");
   for (int i = 0; i < 4; i++) {
     Serial.print(motorMapping[i]);
@@ -76,12 +89,53 @@ void loadConfig() {
   Serial.println("]");
 }
 
+void saveConfig() {
+  preferences.begin("robot", false);
+
+  for (int i = 0; i < 4; i++) {
+    String key = "map" + String(i);
+    preferences.putInt(key.c_str(), motorMapping[i]);
+
+    key = "inv" + String(i);
+    preferences.putBool(key.c_str(), motorInvert[i]);
+  }
+
+  preferences.end();
+  Serial.println("✓ Конфигурация сохранена в EEPROM");
+}
+
+void resetConfig() {
+  motorMapping[0] = 1;
+  motorMapping[1] = 2;
+  motorMapping[2] = 3;
+  motorMapping[3] = 4;
+
+  motorInvert[0] = false;
+  motorInvert[1] = false;
+  motorInvert[2] = false;
+  motorInvert[3] = false;
+
+  Serial.println("✓ Конфигурация сброшена к дефолту");
+}
+
+String getConfigJSON() {
+  StaticJsonDocument<256> doc;
+  JsonArray mapping = doc.createNestedArray("mapping");
+  JsonArray invert = doc.createNestedArray("invert");
+
+  for (int i = 0; i < 4; i++) {
+    mapping.add(motorMapping[i]);
+    invert.add(motorInvert[i]);
+  }
+
+  String output;
+  serializeJson(doc, output);
+  return output;
+}
+
 // ==================== ФУНКЦИИ УПРАВЛЕНИЯ МОТОРАМИ ====================
 
-// Установить скорость и направление для одного ФИЗИЧЕСКОГО мотора
 void setPhysicalMotor(int motorNum, int speed) {
-  // speed: -255 до 255 (отрицательное = назад, положительное = вперед, 0 = стоп)
-
   int pwmChannel, pinD0, pinD1;
 
   switch(motorNum) {
@@ -109,57 +163,41 @@ void setPhysicalMotor(int motorNum, int speed) {
       return;
   }
 
-  if (speed == 0) {
-    // Холостой ход (по таблице TA6586)
-    digitalWrite(pinD1, LOW);
-    ledcWrite(pwmChannel, 0);
-  } else if (speed > 0) {
-    // Вперёд: D0 = HIGH/PWM, D1 = LOW (по таблице TA6586)
+  if (speed > 0) {
+    // Вперёд: D1=LOW, D0=PWM
     digitalWrite(pinD1, LOW);
     delayMicroseconds(10);
     ledcWrite(pwmChannel, abs(speed));
-  } else {
-    // Назад: D0 = LOW/PWM, D1 = HIGH (по таблице TA6586)
-    // LOW/PWM означает ИНВЕРТИРОВАННЫЙ PWM: больше скорость = меньше duty cycle!
-    int invertedPWM = 255 - abs(speed);
+  } else if (speed < 0) {
+    // Назад: D1=HIGH, D0=PWM (инверсный)
     digitalWrite(pinD1, HIGH);
     delayMicroseconds(10);
-    ledcWrite(pwmChannel, invertedPWM);
+    ledcWrite(pwmChannel, 255 - abs(speed));
+  } else {
+    // Стоп
+    digitalWrite(pinD1, LOW);
+    ledcWrite(pwmChannel, 0);
   }
 }
 
-// Установить скорость для ЛОГИЧЕСКОГО мотора (с учетом маппинга и инверсии)
 void setMotor(int logicalMotor, int speed) {
-  // logicalMotor: 1-4 (логические позиции)
-  // speed: -255 до 255
-
   if (logicalMotor < 1 || logicalMotor > 4) return;
 
-  int index = logicalMotor - 1;  // Преобразовать в индекс массива (0-3)
-  int physicalMotor = motorMapping[index];
+  int logicalPos = logicalMotor - 1;
+  int physicalMotor = motorMapping[logicalPos];
 
-  // Применить инверсию если включена
-  if (motorInvert[index]) {
+  if (motorInvert[logicalPos]) {
     speed = -speed;
   }
 
   setPhysicalMotor(physicalMotor, speed);
 }
 
-// Остановить все моторы
 void stopAllMotors() {
-  setMotor(1, 0);
-  setMotor(2, 0);
-  setMotor(3, 0);
-  setMotor(4, 0);
+  for (int i = 1; i <= 4; i++) {
+    setPhysicalMotor(i, 0);
+  }
 }
-
-// ==================== ФУНКЦИИ ДВИЖЕНИЯ OMNI-РОБОТА ====================
-// Предполагается X-конфигурация колес (смотря сверху):
-//     M1 ↗  ↖ M2
-//         ╲╱
-//         ╱╲
-//     M3 ↙  ↘ M4
 
 void moveForward() {
   setMotor(1, currentSpeed);
@@ -175,14 +213,14 @@ void moveBackward() {
   setMotor(4, -currentSpeed);
 }
 
-void moveLeft() {
+void strafeLeft() {
   setMotor(1, -currentSpeed);
   setMotor(2, currentSpeed);
   setMotor(3, currentSpeed);
   setMotor(4, -currentSpeed);
 }
 
-void moveRight() {
+void strafeRight() {
   setMotor(1, currentSpeed);
   setMotor(2, -currentSpeed);
   setMotor(3, -currentSpeed);
@@ -203,110 +241,158 @@ void rotateRight() {
   setMotor(4, -currentSpeed);
 }
 
-// ==================== ОБРАБОТКА WIIMOTE ====================
+void handleJoystick(int8_t x, int8_t y) {
+  // Преобразовать int8_t (-128..127) в -255..255
+  int scaledX = map(x, -128, 127, -255, 255);
+  int scaledY = map(y, -128, 127, -255, 255);
 
-void handleWiimoteInput() {
-  if (wiimote.available() > 0) {
-    uint16_t button = wiimote.getButtonState();
+  // X-конфигурация омни-платформы
+  // Y = вперёд/назад, X = вращение
+  int m1 = constrain(scaledY - scaledX, -255, 255);
+  int m2 = constrain(scaledY + scaledX, -255, 255);
+  int m3 = constrain(scaledY - scaledX, -255, 255);
+  int m4 = constrain(scaledY + scaledX, -255, 255);
 
-    // Отладочный вывод при изменении состояния кнопок
-    if (button != lastButtonState) {
-      Serial.printf("Buttons: 0x%04x = ", (int)button);
+  setMotor(1, m1);
+  setMotor(2, m2);
+  setMotor(3, m3);
+  setMotor(4, m4);
+}
 
-      if (button & ESP32Wiimote::BUTTON_A)     Serial.print("A ");
-      if (button & ESP32Wiimote::BUTTON_B)     Serial.print("B ");
-      if (button & ESP32Wiimote::BUTTON_ONE)   Serial.print("1 ");
-      if (button & ESP32Wiimote::BUTTON_TWO)   Serial.print("2 ");
-      if (button & ESP32Wiimote::BUTTON_MINUS) Serial.print("- ");
-      if (button & ESP32Wiimote::BUTTON_PLUS)  Serial.print("+ ");
-      if (button & ESP32Wiimote::BUTTON_HOME)  Serial.print("HOME ");
-      if (button & ESP32Wiimote::BUTTON_LEFT)  Serial.print("< ");
-      if (button & ESP32Wiimote::BUTTON_RIGHT) Serial.print("> ");
-      if (button & ESP32Wiimote::BUTTON_UP)    Serial.print("^ ");
-      if (button & ESP32Wiimote::BUTTON_DOWN)  Serial.print("v ");
+// ==================== BLE CALLBACKS ====================
 
-      Serial.printf("| Speed: %d\n", currentSpeed);
-      lastButtonState = button;
-    }
+class MyServerCallbacks: public BLEServerCallbacks {
+  void onConnect(BLEServer* pServer) {
+    deviceConnected = true;
+    Serial.println("✓ BLE устройство подключено");
+  }
 
-    // Приоритет: HOME (аварийная остановка) имеет наивысший приоритет
-    if (button & ESP32Wiimote::BUTTON_HOME) {
-      stopAllMotors();
-      Serial.println("🛑 АВАРИЙНАЯ ОСТАНОВКА!");
-      return;
-    }
+  void onDisconnect(BLEServer* pServer) {
+    deviceConnected = false;
+    stopAllMotors();
+    Serial.println("✗ BLE устройство отключено");
+    delay(500);
+    BLEDevice::startAdvertising();
+  }
+};
 
-    // Векторное сложение движений для комбинированного управления
-    // Позволяет нажимать несколько кнопок одновременно (например, вперёд + стрейф)
-    float motor1 = 0, motor2 = 0, motor3 = 0, motor4 = 0;
+class CommandCallbacks: public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+    std::string value = pCharacteristic->getValue();
+    if (value.length() > 0) {
+      String command = String(value.c_str());
+      Serial.println("Команда: " + command);
 
-    // D-pad управление (для ГОРИЗОНТАЛЬНОГО положения Wiimote)
-    // X-конфигурация: M1↗ M2↖ M3↙ M4↘
-
-    // Вперёд/Назад
-    if (button & ESP32Wiimote::BUTTON_LEFT) {
-      // Вперёд: все моторы +1
-      motor1 += 1.0;
-      motor2 += 1.0;
-      motor3 += 1.0;
-      motor4 += 1.0;
-    }
-    if (button & ESP32Wiimote::BUTTON_RIGHT) {
-      // Назад: все моторы -1
-      motor1 -= 1.0;
-      motor2 -= 1.0;
-      motor3 -= 1.0;
-      motor4 -= 1.0;
-    }
-
-    // Поворот
-    if (button & ESP32Wiimote::BUTTON_UP) {
-      // Поворот влево: M1-, M2+, M3-, M4+
-      motor1 -= 1.0;
-      motor2 += 1.0;
-      motor3 -= 1.0;
-      motor4 += 1.0;
-    }
-    if (button & ESP32Wiimote::BUTTON_DOWN) {
-      // Поворот вправо: M1+, M2-, M3+, M4-
-      motor1 += 1.0;
-      motor2 -= 1.0;
-      motor3 += 1.0;
-      motor4 -= 1.0;
-    }
-
-    // Стрейф (кнопки A, B, 1, 2)
-    if ((button & ESP32Wiimote::BUTTON_A) || (button & ESP32Wiimote::BUTTON_TWO)) {
-      // Стрейф вправо: M1+, M2-, M3-, M4+
-      motor1 += 1.0;
-      motor2 -= 1.0;
-      motor3 -= 1.0;
-      motor4 += 1.0;
-    }
-    if ((button & ESP32Wiimote::BUTTON_B) || (button & ESP32Wiimote::BUTTON_ONE)) {
-      // Стрейф влево: M1-, M2+, M3+, M4-
-      motor1 -= 1.0;
-      motor2 += 1.0;
-      motor3 += 1.0;
-      motor4 -= 1.0;
-    }
-
-    // Нормализация и применение скорости
-    float maxVal = max(max(abs(motor1), abs(motor2)), max(abs(motor3), abs(motor4)));
-
-    if (maxVal > 0.01) {
-      // Есть движение - нормализуем и применяем currentSpeed
-      float scale = currentSpeed / maxVal;
-      setMotor(1, (int)(motor1 * scale));
-      setMotor(2, (int)(motor2 * scale));
-      setMotor(3, (int)(motor3 * scale));
-      setMotor(4, (int)(motor4 * scale));
-    } else {
-      // Ни одна кнопка движения не нажата - остановка
-      stopAllMotors();
+      if (command == "forward") {
+        moveForward();
+      } else if (command == "backward") {
+        moveBackward();
+      } else if (command == "strafe_left") {
+        strafeLeft();
+      } else if (command == "strafe_right") {
+        strafeRight();
+      } else if (command == "rotate_left") {
+        rotateLeft();
+      } else if (command == "rotate_right") {
+        rotateRight();
+      } else if (command == "stop") {
+        stopAllMotors();
+      }
     }
   }
-}
+};
+
+class JoystickCallbacks: public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+    uint8_t* data = pCharacteristic->getData();
+    size_t len = pCharacteristic->getLength();
+
+    if (len == 2) {
+      int8_t x = (int8_t)data[0];
+      int8_t y = (int8_t)data[1];
+      handleJoystick(x, y);
+    }
+  }
+};
+
+class SpeedCallbacks: public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+    uint8_t* data = pCharacteristic->getData();
+    if (pCharacteristic->getLength() == 1) {
+      currentSpeed = data[0];
+      Serial.printf("Скорость изменена на: %d\n", currentSpeed);
+    }
+  }
+};
+
+class ConfigCallbacks: public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+    std::string value = pCharacteristic->getValue();
+    if (value.length() > 0) {
+      String command = String(value.c_str());
+      Serial.println("Config команда: " + command);
+
+      if (command == "save") {
+        saveConfig();
+        pCharConfig->setValue(getConfigJSON().c_str());
+        pCharConfig->notify();
+      } else if (command == "reset") {
+        resetConfig();
+        pCharConfig->setValue(getConfigJSON().c_str());
+        pCharConfig->notify();
+      } else if (command.startsWith("set_map:")) {
+        int firstColon = command.indexOf(':', 8);
+        int logicalPos = command.substring(8, firstColon).toInt();
+        int physicalMotor = command.substring(firstColon + 1).toInt();
+
+        if (logicalPos >= 0 && logicalPos < 4 && physicalMotor >= 1 && physicalMotor <= 4) {
+          motorMapping[logicalPos] = physicalMotor;
+          Serial.printf("Маппинг: позиция %d -> мотор %d\n", logicalPos, physicalMotor);
+        }
+      } else if (command.startsWith("set_inv:")) {
+        int firstColon = command.indexOf(':', 8);
+        int logicalPos = command.substring(8, firstColon).toInt();
+        int value = command.substring(firstColon + 1).toInt();
+
+        if (logicalPos >= 0 && logicalPos < 4) {
+          motorInvert[logicalPos] = (value == 1);
+          Serial.printf("Инверсия: позиция %d = %d\n", logicalPos, value);
+        }
+      }
+    }
+  }
+
+  void onRead(BLECharacteristic *pCharacteristic) {
+    pCharacteristic->setValue(getConfigJSON().c_str());
+  }
+};
+
+class TestMotorCallbacks: public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+    std::string value = pCharacteristic->getValue();
+    if (value.length() > 0) {
+      String command = String(value.c_str());
+      Serial.println("Test команда: " + command);
+
+      // test_0_fwd, test_1_bwd, test_2_stop и т.д.
+      if (command.startsWith("test_")) {
+        int pos = command.substring(5, 6).toInt();
+        String action = command.substring(7);
+
+        if (pos >= 0 && pos < 4) {
+          int logicalMotor = pos + 1;
+          if (action == "fwd") {
+            setMotor(logicalMotor, currentSpeed);
+          } else if (action == "bwd") {
+            setMotor(logicalMotor, -currentSpeed);
+          } else if (action == "stop") {
+            setMotor(logicalMotor, 0);
+          }
+        }
+      }
+    }
+  }
+};
 
 // ==================== SETUP ====================
 
@@ -316,15 +402,15 @@ void setup() {
 
   Serial.println("\n\n=================================");
   Serial.println("   ESP32 Omni Robot Controller");
-  Serial.println("   Nintendo Wii Remote Edition");
+  Serial.println("   Web Bluetooth Edition");
   Serial.println("=================================\n");
 
-  Serial.println("TA6586 управление (по официальной таблице):");
+  Serial.println("TA6586 управление:");
   Serial.println("  Вперёд: D0=HIGH/PWM, D1=LOW");
   Serial.println("  Назад:  D0=LOW/PWM (инверсный), D1=HIGH");
   Serial.println("  Холостой: D0=LOW, D1=LOW\n");
 
-  // Загрузить конфигурацию из памяти
+  // Загрузить конфигурацию
   loadConfig();
 
   // Настройка пинов моторов
@@ -333,48 +419,82 @@ void setup() {
   pinMode(MOTOR3_D1, OUTPUT);
   pinMode(MOTOR4_D1, OUTPUT);
 
-  // Настройка PWM каналов
-  ledcSetup(PWM_CHANNEL_M1, PWM_FREQ, PWM_RESOLUTION);
-  ledcSetup(PWM_CHANNEL_M2, PWM_FREQ, PWM_RESOLUTION);
-  ledcSetup(PWM_CHANNEL_M3, PWM_FREQ, PWM_RESOLUTION);
-  ledcSetup(PWM_CHANNEL_M4, PWM_FREQ, PWM_RESOLUTION);
+  // PWM настройка
+  ledcSetup(PWM_CHANNEL_M1, PWM_FREQ, PWM_RES);
+  ledcSetup(PWM_CHANNEL_M2, PWM_FREQ, PWM_RES);
+  ledcSetup(PWM_CHANNEL_M3, PWM_FREQ, PWM_RES);
+  ledcSetup(PWM_CHANNEL_M4, PWM_FREQ, PWM_RES);
 
   ledcAttachPin(MOTOR1_D0, PWM_CHANNEL_M1);
   ledcAttachPin(MOTOR2_D0, PWM_CHANNEL_M2);
   ledcAttachPin(MOTOR3_D0, PWM_CHANNEL_M3);
   ledcAttachPin(MOTOR4_D0, PWM_CHANNEL_M4);
 
-  // Остановить все моторы при старте
   stopAllMotors();
-
   Serial.println("✓ Моторы инициализированы");
 
-  // Инициализация Wiimote
-  Serial.println("\nИнициализация Wii Remote...");
-  wiimote.init();
-  Serial.println("✓ Wiimote инициализирован");
-  Serial.println("\n=================================");
-  Serial.println("Нажми 1+2 на Wiimote для подключения");
+  // BLE инициализация
+  Serial.println("\nИнициализация BLE...");
+  BLEDevice::init("Omni Robot");
+
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  // Command характеристика
+  pCharCommand = pService->createCharacteristic(
+    CHAR_UUID_COMMAND,
+    BLECharacteristic::PROPERTY_WRITE
+  );
+  pCharCommand->setCallbacks(new CommandCallbacks());
+
+  // Joystick характеристика
+  pCharJoystick = pService->createCharacteristic(
+    CHAR_UUID_JOYSTICK,
+    BLECharacteristic::PROPERTY_WRITE
+  );
+  pCharJoystick->setCallbacks(new JoystickCallbacks());
+
+  // Speed характеристика
+  pCharSpeed = pService->createCharacteristic(
+    CHAR_UUID_SPEED,
+    BLECharacteristic::PROPERTY_WRITE
+  );
+  pCharSpeed->setCallbacks(new SpeedCallbacks());
+
+  // Config характеристика
+  pCharConfig = pService->createCharacteristic(
+    CHAR_UUID_CONFIG,
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY
+  );
+  pCharConfig->setCallbacks(new ConfigCallbacks());
+  pCharConfig->addDescriptor(new BLE2902());
+
+  // Test Motor характеристика
+  pCharTest = pService->createCharacteristic(
+    CHAR_UUID_TEST,
+    BLECharacteristic::PROPERTY_WRITE
+  );
+  pCharTest->setCallbacks(new TestMotorCallbacks());
+
+  pService->start();
+
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);
+  pAdvertising->setMinPreferred(0x12);
+  BLEDevice::startAdvertising();
+
+  Serial.println("✓ BLE сервер запущен");
+  Serial.println("Устройство: Omni Robot");
+  Serial.println("Ожидание подключения...\n");
   Serial.println("=================================\n");
-  Serial.println("Управление (Wiimote в ГОРИЗОНТАЛЬНОМ положении):");
-  Serial.println("  D-pad ←   = Вперёд");
-  Serial.println("  D-pad →   = Назад");
-  Serial.println("  D-pad ↑   = Поворот влево");
-  Serial.println("  D-pad ↓   = Поворот вправо");
-  Serial.println("  Кнопка A  = Стрейф вправо");
-  Serial.println("  Кнопка B  = Стрейф влево");
-  Serial.println("  Кнопка 1  = Стрейф влево (дублирует B)");
-  Serial.println("  Кнопка 2  = Стрейф вправо (дублирует A)");
-  Serial.println("  Кнопка HOME = АВАРИЙНАЯ ОСТАНОВКА");
-  Serial.println("\n✨ Можно нажимать несколько кнопок одновременно!");
-  Serial.println("   Например: ← + A = движение по диагонали");
-  Serial.println("\n=================================\n");
 }
 
 // ==================== LOOP ====================
 
 void loop() {
-  wiimote.task();
-  handleWiimoteInput();
   delay(10);
 }
