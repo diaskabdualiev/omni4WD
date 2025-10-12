@@ -252,11 +252,18 @@ void handleJoystick(int8_t x, int8_t y) {
   //         ╲╱
   //         ╱╲
   //     M3 ↙  ↘ M4
-  // M1 (↗): Y+X, M2 (↖): Y-X, M3 (↙): -Y-X, M4 (↘): -Y+X
+  //
+  // Формулы для джойстика (без rotation):
+  // M1 = Y+X, M2 = Y-X, M3 = Y-X, M4 = Y+X
+  //
+  // Проверка:
+  // - Forward (Y=1, X=0): M1=1, M2=1, M3=1, M4=1 ✓
+  // - Strafe Left (Y=0, X=-1): M1=-1, M2=1, M3=1, M4=-1 ✓
+  // - Strafe Right (Y=0, X=1): M1=1, M2=-1, M3=-1, M4=1 ✓
   int m1 = constrain(scaledY + scaledX, -255, 255);
   int m2 = constrain(scaledY - scaledX, -255, 255);
-  int m3 = constrain(-scaledY - scaledX, -255, 255);
-  int m4 = constrain(-scaledY + scaledX, -255, 255);
+  int m3 = constrain(scaledY - scaledX, -255, 255);  // Как M2
+  int m4 = constrain(scaledY + scaledX, -255, 255);  // Как M1
 
   setMotor(1, m1);
   setMotor(2, m2);
