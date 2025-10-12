@@ -244,6 +244,26 @@ document.addEventListener('selectstart', function(e) {
   e.preventDefault();
 });
 
+// ========== Handle orientation change ==========
+
+window.addEventListener('orientationchange', () => {
+  setTimeout(() => {
+    if (joystick) {
+      console.log('[App] Orientation changed, reinitializing joystick');
+      initJoystick();
+    }
+  }, 200);
+});
+
+// Also handle resize for joystick recalculation
+window.addEventListener('resize', () => {
+  if (joystick) {
+    setTimeout(() => {
+      initJoystick();
+    }, 100);
+  }
+});
+
 // ========== Initialize on load ==========
 
 if (document.readyState === 'loading') {
