@@ -119,9 +119,9 @@ void resetConfig() {
 }
 
 String getConfigJSON() {
-  StaticJsonDocument<256> doc;
-  JsonArray mapping = doc.createNestedArray("mapping");
-  JsonArray invert = doc.createNestedArray("invert");
+  JsonDocument doc;
+  JsonArray mapping = doc["mapping"].to<JsonArray>();
+  JsonArray invert = doc["invert"].to<JsonArray>();
 
   for (int i = 0; i < 4; i++) {
     mapping.add(motorMapping[i]);
@@ -248,11 +248,15 @@ void handleJoystick(int8_t x, int8_t y) {
 
   // X-конфигурация омни-платформы
   // Y = вперёд/назад, X = стрейф влево/вправо
-  // Формула: M1,M4 зависят от Y+X; M2,M3 зависят от Y-X
+  //     M1 ↗  ↖ M2
+  //         ╲╱
+  //         ╱╲
+  //     M3 ↙  ↘ M4
+  // M1 (↗): Y+X, M2 (↖): Y-X, M3 (↙): -Y-X, M4 (↘): -Y+X
   int m1 = constrain(scaledY + scaledX, -255, 255);
   int m2 = constrain(scaledY - scaledX, -255, 255);
-  int m3 = constrain(scaledY - scaledX, -255, 255);
-  int m4 = constrain(scaledY + scaledX, -255, 255);
+  int m3 = constrain(-scaledY - scaledX, -255, 255);
+  int m4 = constrain(-scaledY + scaledX, -255, 255);
 
   setMotor(1, m1);
   setMotor(2, m2);

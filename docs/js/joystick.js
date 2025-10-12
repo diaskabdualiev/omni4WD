@@ -65,7 +65,7 @@ class Joystick {
 
     // Draw stick
     const stickX = this.centerX + (this.x * this.maxRadius / 255);
-    const stickY = this.centerY + (this.y * this.maxRadius / 255);
+    const stickY = this.centerY - (this.y * this.maxRadius / 255);  // Invert Y for correct visual feedback
 
     this.ctx.beginPath();
     this.ctx.arc(stickX, stickY, 30, 0, 2 * Math.PI);

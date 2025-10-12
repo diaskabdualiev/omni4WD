@@ -479,21 +479,89 @@ body {
 }
 
 @media (max-width: 600px) {
-  .robot-visual {
-    gap: 15px;
+  body {
+    padding: 10px;
+  }
+
+  .container {
+    border-radius: 8px;
+  }
+
+  .header {
     padding: 15px;
   }
 
-  .motor-corner {
-    padding: 12px;
+  .header h1 {
+    font-size: 18px;
   }
 
-  .corner-header .icon {
+  .tab-content {
+    padding: 20px 15px;
+  }
+
+  /* Джойстик и стрейф в колонку на маленьких экранах */
+  #joystick-mode > div {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Увеличить кнопки для сенсорных экранов */
+  .btn {
+    padding: 24px;
+    font-size: 28px;
+  }
+
+  .rotate-buttons .btn {
     font-size: 24px;
   }
 
-  .test-controls .btn {
-    padding: 10px 5px;
+  .emergency-stop {
+    padding: 20px;
+    font-size: 18px;
+  }
+
+  .robot-visual {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .motor-corner {
+    padding: 10px;
+  }
+
+  .corner-header h3 {
     font-size: 12px;
+  }
+
+  .corner-header .icon {
+    font-size: 20px;
+  }
+
+  .test-controls .btn {
+    padding: 12px 6px;
+    font-size: 14px;
+  }
+
+  .speed-value {
+    font-size: 24px;
+  }
+}
+
+/* Для очень маленьких экранов */
+@media (max-width: 400px) {
+  .header h1 {
+    font-size: 16px;
+  }
+
+  .btn {
+    padding: 20px;
+    font-size: 24px;
+  }
+
+  .joystick-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .control-grid {
+    gap: 8px;
   }
 }
