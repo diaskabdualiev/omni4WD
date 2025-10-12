@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#3b82f6">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Omni Robot Control 🤖</title>
+
+  <!-- PWA manifest -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🤖 Omni Robot Control</h1>
+      <button id="connectBtn" class="connect-btn">🔗 Подключить робота</button>
+      <div class="status" id="status">Не подключено</div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab(0)">Управление</button>
+      <button class="tab" onclick="switchTab(1)">Калибровка</button>
+    </div>
+
+    <!-- Вкладка 1: Управление -->
+    <div class="tab-content active" id="tab-control">
+      <!-- Переключатель режимов -->
+      <div style="text-align:center; margin-bottom:20px;">
+        <div style="display:inline-flex; background:#f1f5f9; border-radius:8px; padding:4px;">
+          <button id="modeJoystick" class="mode-btn active" onclick="switchMode('joystick')">🕹️ Джойстик</button>
+          <button id="modeButtons" class="mode-btn" onclick="switchMode('buttons')">🎮 Кнопки</button>
+        </div>
+      </div>
+
+      <div class="speed-control">
+        <label>Скорость</label>
+        <input type="range" class="speed-slider" min="0" max="255" value="200" id="speedSlider" oninput="updateSpeed()">
+        <div class="speed-value" id="speedValue">200</div>
+      </div>
+
+      <!-- Режим джойстика -->
+      <div id="joystick-mode" class="control-mode">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:20px;">
+          <!-- Джойстик слева -->
+          <div>
+            <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Джойстик</h3>
+            <div style="position:relative; width:100%; padding-bottom:100%; background:#f8fafc; border-radius:12px; border:2px solid #e2e8f0;">
+              <canvas id="joystickCanvas" style="position:absolute; width:100%; height:100%; touch-action:none;"></canvas>
+            </div>
+          </div>
+
+          <!-- Стрейф справа -->
+          <div>
+            <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Стрейф</h3>
+            <div class="rotate-buttons">
+              <button class="btn" ontouchstart="sendCommand('left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('left')" onmouseup="sendCommand('stop')">⟲</button>
+              <button class="btn" ontouchstart="sendCommand('right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('right')" onmouseup="sendCommand('stop')">⟳</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Режим кнопок -->
+      <div id="buttons-mode" class="control-mode" style="display:none;">
+        <div class="joystick-layout">
+        <!-- Левая половина: направления -->
+        <div>
+          <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Движение</h3>
+          <div class="control-grid">
+            <div class="btn empty"></div>
+            <button class="btn" ontouchstart="sendCommand('forward')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('forward')" onmouseup="sendCommand('stop')">⬆️</button>
+            <div class="btn empty"></div>
+
+            <button class="btn" ontouchstart="sendCommand('rotate_left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('rotate_left')" onmouseup="sendCommand('stop')">⬅️</button>
+            <button class="btn stop" onclick="sendCommand('stop')">⏹️</button>
+            <button class="btn" ontouchstart="sendCommand('rotate_right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('rotate_right')" onmouseup="sendCommand('stop')">➡️</button>
+
+            <div class="btn empty"></div>
+            <button class="btn" ontouchstart="sendCommand('backward')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('backward')" onmouseup="sendCommand('stop')">⬇️</button>
+            <div class="btn empty"></div>
+          </div>
+        </div>
+
+        <!-- Правая половина: стрейф -->
+        <div>
+          <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Стрейф</h3>
+          <div class="rotate-buttons">
+            <button class="btn" ontouchstart="sendCommand('left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('left')" onmouseup="sendCommand('stop')">⟲</button>
+            <button class="btn" ontouchstart="sendCommand('right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('right')" onmouseup="sendCommand('stop')">⟳</button>
+          </div>
+        </div>
+      </div>
+      </div>
+
+      <button class="emergency-stop" onclick="sendCommand('stop')">🛑 АВАРИЙНЫЙ СТОП</button>
+    </div>
+
+    <!-- Вкладка 2: Калибровка -->
+    <div class="tab-content" id="tab-calibration">
+      <div class="speed-control">
+        <label>Скорость тестирования</label>
+        <input type="range" class="speed-slider" min="0" max="255" value="200" id="speedSlider2" oninput="updateSpeed2()">
+        <div class="speed-value" id="speedValue2">200</div>
+      </div>
+
+      <div class="info-box">
+        <p><strong>Инструкция:</strong></p>
+        <p>1. Нажми кнопки теста для каждого угла</p>
+        <p>2. Выбери правильный физический мотор из списка</p>
+        <p>3. Поставь галочку "Реверс" если мотор крутится наоборот</p>
+        <p>4. Нажми "Сохранить" когда все настроено</p>
+      </div>
+
+      <div class="robot-visual">
+        <!-- Передний-левый (M2) -->
+        <div class="motor-corner">
+          <div class="corner-header">
+            <div class="icon">↖️</div>
+            <h3>Передний-левый</h3>
+          </div>
+          <div class="test-controls">
+            <button class="btn forward" ontouchstart="sendTestCommand('test_1_fwd')" ontouchend="sendTestCommand('test_1_stop')" onmousedown="sendTestCommand('test_1_fwd')" onmouseup="sendTestCommand('test_1_stop')">⬆️</button>
+            <button class="btn test-stop" onclick="sendTestCommand('test_1_stop')">⏹️</button>
+            <button class="btn backward" ontouchstart="sendTestCommand('test_1_bwd')" ontouchend="sendTestCommand('test_1_stop')" onmousedown="sendTestCommand('test_1_bwd')" onmouseup="sendTestCommand('test_1_stop')">⬇️</button>
+          </div>
+          <div class="corner-settings">
+            <div class="setting-item">
+              <label>Физический мотор:</label>
+              <select id="map1" onchange="updateMapping(1)">
+                <option value="1">Мотор 1 (32,33)</option>
+                <option value="2">Мотор 2 (25,26)</option>
+                <option value="3">Мотор 3 (19,18)</option>
+                <option value="4">Мотор 4 (17,16)</option>
+              </select>
+            </div>
+            <div class="invert-check">
+              <input type="checkbox" id="inv1" onchange="updateInvert(1)">
+              <label for="inv1">Реверс</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Передний-правый (M1) -->
+        <div class="motor-corner">
+          <div class="corner-header">
+            <div class="icon">↗️</div>
+            <h3>Передний-правый</h3>
+          </div>
+          <div class="test-controls">
+            <button class="btn forward" ontouchstart="sendTestCommand('test_0_fwd')" ontouchend="sendTestCommand('test_0_stop')" onmousedown="sendTestCommand('test_0_fwd')" onmouseup="sendTestCommand('test_0_stop')">⬆️</button>
+            <button class="btn test-stop" onclick="sendTestCommand('test_0_stop')">⏹️</button>
+            <button class="btn backward" ontouchstart="sendTestCommand('test_0_bwd')" ontouchend="sendTestCommand('test_0_stop')" onmousedown="sendTestCommand('test_0_bwd')" onmouseup="sendTestCommand('test_0_stop')">⬇️</button>
+          </div>
+          <div class="corner-settings">
+            <div class="setting-item">
+              <label>Физический мотор:</label>
+              <select id="map0" onchange="updateMapping(0)">
+                <option value="1">Мотор 1 (32,33)</option>
+                <option value="2">Мотор 2 (25,26)</option>
+                <option value="3">Мотор 3 (19,18)</option>
+                <option value="4">Мотор 4 (17,16)</option>
+              </select>
+            </div>
+            <div class="invert-check">
+              <input type="checkbox" id="inv0" onchange="updateInvert(0)">
+              <label for="inv0">Реверс</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Задний-левый (M3) -->
+        <div class="motor-corner">
+          <div class="corner-header">
+            <div class="icon">↙️</div>
+            <h3>Задний-левый</h3>
+          </div>
+          <div class="test-controls">
+            <button class="btn forward" ontouchstart="sendTestCommand('test_2_fwd')" ontouchend="sendTestCommand('test_2_stop')" onmousedown="sendTestCommand('test_2_fwd')" onmouseup="sendTestCommand('test_2_stop')">⬆️</button>
+            <button class="btn test-stop" onclick="sendTestCommand('test_2_stop')">⏹️</button>
+            <button class="btn backward" ontouchstart="sendTestCommand('test_2_bwd')" ontouchend="sendTestCommand('test_2_stop')" onmousedown="sendTestCommand('test_2_bwd')" onmouseup="sendTestCommand('test_2_stop')">⬇️</button>
+          </div>
+          <div class="corner-settings">
+            <div class="setting-item">
+              <label>Физический мотор:</label>
+              <select id="map2" onchange="updateMapping(2)">
+                <option value="1">Мотор 1 (32,33)</option>
+                <option value="2">Мотор 2 (25,26)</option>
+                <option value="3">Мотор 3 (19,18)</option>
+                <option value="4">Мотор 4 (17,16)</option>
+              </select>
+            </div>
+            <div class="invert-check">
+              <input type="checkbox" id="inv2" onchange="updateInvert(2)">
+              <label for="inv2">Реверс</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Задний-правый (M4) -->
+        <div class="motor-corner">
+          <div class="corner-header">
+            <div class="icon">↘️</div>
+            <h3>Задний-правый</h3>
+          </div>
+          <div class="test-controls">
+            <button class="btn forward" ontouchstart="sendTestCommand('test_3_fwd')" ontouchend="sendTestCommand('test_3_stop')" onmousedown="sendTestCommand('test_3_fwd')" onmouseup="sendTestCommand('test_3_stop')">⬆️</button>
+            <button class="btn test-stop" onclick="sendTestCommand('test_3_stop')">⏹️</button>
+            <button class="btn backward" ontouchstart="sendTestCommand('test_3_bwd')" ontouchend="sendTestCommand('test_3_stop')" onmousedown="sendTestCommand('test_3_bwd')" onmouseup="sendTestCommand('test_3_stop')">⬇️</button>
+          </div>
+          <div class="corner-settings">
+            <div class="setting-item">
+              <label>Физический мотор:</label>
+              <select id="map3" onchange="updateMapping(3)">
+                <option value="1">Мотор 1 (32,33)</option>
+                <option value="2">Мотор 2 (25,26)</option>
+                <option value="3">Мотор 3 (19,18)</option>
+                <option value="4">Мотор 4 (17,16)</option>
+              </select>
+            </div>
+            <div class="invert-check">
+              <input type="checkbox" id="inv3" onchange="updateInvert(3)">
+              <label for="inv3">Реверс</label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="action-buttons">
+        <button class="btn save" onclick="saveSettings()">💾 Сохранить настройки</button>
+        <button class="btn reset" onclick="resetSettings()">🔄 Сброс</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/bluetooth.js"></script>
+  <script src="js/joystick.js"></script>
+  <script src="js/app.js"></script>
+
+  <!-- PWA Service Worker -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js')
+        .then(reg => console.log('Service Worker зарегистрирован', reg))
+        .catch(err => console.log('Service Worker ошибка', err));
+    }
+  </script>
+</body>
+</html>

@@ -1,20 +1,64 @@
-# ESP32 Omni Robot Controller - Wii Remote Edition 🎮
+# ESP32 Omni Robot Controller - Web Bluetooth Edition 🌐🤖
 
-Nintendo Wii Remote controlled 4-wheel omni-directional robot using ESP32 and TA6586 motor drivers.
+Progressive Web App для управления 4-колесным omni-роботом через Bluetooth Low Energy прямо из браузера!
 
-## Features
+## ✨ Features
 
-- **🎮 Nintendo Wii Remote Control**: Wireless control via Bluetooth
-- **Multi-Button Support**: Press multiple buttons simultaneously for diagonal/combined movements
-- **Omni-Directional Movement**: Forward, backward, strafe, rotation, and diagonal movements
-- **Vector-Based Control**: Smooth movement combining multiple inputs
-- **Persistent Motor Calibration**: Motor configuration loaded from ESP32 NVS (EEPROM)
-- **Emergency Stop**: Instant safety stop with HOME button
+- **🌐 Web Bluetooth API**: Управление прямо из браузера без установки приложений
+- **📱 Progressive Web App**: Установи на домашний экран, работает офлайн
+- **🎮 Два режима управления**: Джойстик (canvas) и кнопочный
+- **⚙️ Калибровка моторов**: Визуальный 2x2 grid для настройки
+- **💾 Persistent Settings**: Конфигурация сохраняется в ESP32 EEPROM
+- **🔋 Низкое энергопотребление**: BLE экономичнее WiFi
 
-## Hardware Requirements
+## 🌍 Browser Compatibility
+
+| Platform | Browser | Status |
+|----------|---------|--------|
+| Android | Chrome 56+ | ✅ Полная поддержка |
+| Windows | Chrome 56+ | ✅ Полная поддержка |
+| macOS | Chrome 56+ | ✅ Полная поддержка |
+| Linux | Chrome 56+ | ✅ Полная поддержка |
+| iOS/iPadOS | Safari | ❌ Не поддерживается |
+| iOS | Bluefy Browser | ✅ Альтернатива (App Store) |
+
+**Важно**: iOS Safari не поддерживает Web Bluetooth API. Для iOS используйте [Bluefy Browser](https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055) из App Store.
+
+## 🚀 Quick Start
+
+### 1. Загрузить firmware на ESP32
+
+```bash
+# Переключиться на ветку web-bluetooth-control
+git checkout web-bluetooth-control
+
+# Скомпилировать и загрузить
+pio run --target upload
+
+# Открыть монитор порта
+pio device monitor
+```
+
+### 2. Открыть веб-интерфейс
+
+Откройте в Chrome (или другом поддерживаемом браузере):
+
+```
+https://yourusername.github.io/asdasddasd/
+```
+
+*(Замените `yourusername` на ваш GitHub username)*
+
+### 3. Подключиться к роботу
+
+1. Нажмите **"🔗 Подключить робота"**
+2. Выберите **"Omni Robot"** из списка устройств
+3. Разрешите доступ к Bluetooth
+4. Управляйте роботом! 🎉
+
+## 🛠️ Hardware Requirements
 
 - ESP32 Development Board (ESP32-DEVKIT)
-- Nintendo Wii Remote (Wiimote)
 - 4× DC Motors with omni wheels (X-configuration)
 - 2× TA6586 H-Bridge Motor Drivers
 - Power supply for motors
@@ -38,62 +82,48 @@ Nintendo Wii Remote controlled 4-wheel omni-directional robot using ESP32 and TA
     M3 ↙  ↘ M4
 ```
 
-## Software Requirements
+## 💻 Software Requirements
 
 - [PlatformIO](https://platformio.org/)
-- Libraries (auto-installed):
-  - [ESP32Wiimote](https://github.com/bigw00d/ESP32Wiimote)
-  - ESP32 Arduino Core
-  - Preferences (EEPROM)
+- Modern web browser with Web Bluetooth support (Chrome recommended)
+- ESP32 Arduino Core (auto-installed)
 
-## Installation
+## 📖 Usage
 
-1. Clone this repository
-2. Build and upload:
-   ```bash
-   pio run --target upload
-   pio device monitor
-   ```
-3. Pair Wii Remote:
-   - Press **1 + 2** buttons simultaneously on Wiimote
-   - Wait for connection (LEDs will light up)
-   - Start controlling!
+### Control Tab
 
-## Controls
+**Joystick Mode (Default):**
+- Drag the joystick to control movement and rotation
+- Left/Right = robot rotation
+- Up/Down = forward/backward
+- Use ⟲⟳ buttons for strafing left/right
 
-### Wiimote Button Mapping (Horizontal Orientation)
+**Button Mode:**
+- ⬆️ Forward | ⬇️ Backward
+- ⬅️ Rotate Left | ➡️ Rotate Right
+- ⟲ Strafe Left | ⟳ Strafe Right
+- ⏹️ Emergency Stop
 
-Hold your Wiimote **horizontally** like a TV remote:
+### Calibration Tab
 
-**D-Pad Movement:**
-- **← (Left)** → Forward 🚗
-- **→ (Right)** → Backward 🔙
-- **↑ (Up)** → Rotate Left ↶
-- **↓ (Down)** → Rotate Right ↷
+1. Test each motor corner using ⬆️⬇️ buttons
+2. Select the correct physical motor from dropdown
+3. Enable "Реверс" (Reverse) if motor spins wrong direction
+4. Click **"💾 Сохранить настройки"** to save to EEPROM
 
-**Strafe (Sideways) Movement:**
-- **A Button** → Strafe Right ➡️
-- **B Button** → Strafe Left ⬅️
-- **2 Button** → Strafe Right (same as A)
-- **1 Button** → Strafe Left (same as B)
+## 🔧 Technical Details
 
-**Emergency:**
-- **HOME Button** → 🛑 **EMERGENCY STOP**
+### BLE Service Architecture
 
-### Multi-Button Combinations
+```
+Service UUID: 4fafc201-1fb5-459e-8fcc-c5c9c331914b
 
-You can press **multiple buttons at once** for advanced movements:
-
-- **← + A** = Diagonal forward-right ↗️
-- **← + B** = Diagonal forward-left ↖️
-- **→ + A** = Diagonal backward-right ↘️
-- **→ + B** = Diagonal backward-left ↙️
-- **← + ↑** = Forward while rotating left 🔄
-- **Any combination!** = Vector sum of all inputs
-
-The system automatically normalizes motor speeds to prevent overcurrent.
-
-## Technical Details
+├── Command Characteristic (movement commands)
+├── Joystick Characteristic (x, y coordinates)
+├── Speed Characteristic (0-255)
+├── Config Characteristic (motor mapping & inversion)
+└── Test Motor Characteristic (calibration)
+```
 
 ### TA6586 Motor Control
 
@@ -107,7 +137,7 @@ The TA6586 has asymmetric control requiring special handling:
 - D0 = LOW/PWM (inverted PWM: `255 - speed`)
 - D1 = HIGH
 
-This is implemented in `setPhysicalMotor()` function at `src/main.cpp:82-129`.
+Implemented in `setPhysicalMotor()` at `src/main.cpp:124-171`.
 
 ### PWM Settings
 
@@ -117,105 +147,124 @@ This is implemented in `setPhysicalMotor()` function at `src/main.cpp:82-129`.
 
 ### Movement Algorithm
 
-The robot uses **vector-based movement** (see `src/main.cpp:239-307`):
+X-configuration kinematics:
 
-1. Each button adds its contribution to motor speeds
-2. Forward: All motors +1
-3. Strafe Right: M1+, M2-, M3-, M4+
-4. Rotation: Opposite pairs
-5. Sum all inputs → Normalize to max speed → Apply to motors
+- **Forward**: All motors +speed
+- **Backward**: All motors -speed
+- **Strafe Left**: M1,M4 negative; M2,M3 positive
+- **Strafe Right**: M1,M4 positive; M2,M3 negative
+- **Rotate Left**: M2,M4 positive; M1,M3 negative
+- **Rotate Right**: M1,M3 positive; M2,M4 negative
 
-### Motor Calibration
+## 🏗️ Development
 
-Motor mapping and direction inversion are loaded from EEPROM on startup. To recalibrate:
-1. Use the WiFi version on `main` branch for calibration UI
-2. Save configuration to EEPROM
-3. Switch back to `wiimote-control` branch
-4. Settings are preserved in EEPROM
-
-## Architecture
+### Project Structure
 
 ```
-ESP32Wiimote Library
-       ↓
-Button State Detection (uint16_t bitmask)
-       ↓
-Vector Addition (float motor1-4)
-       ↓
-Normalization (scale to currentSpeed)
-       ↓
-Motor Mapping (logical → physical)
-       ↓
-Inversion (if configured)
-       ↓
-TA6586 Driver (asymmetric PWM)
-       ↓
-DC Motors (X-configuration)
+web-bluetooth-control/
+├── src/
+│   └── main.cpp              # ESP32 BLE firmware
+├── docs/                     # GitHub Pages (web interface)
+│   ├── index.html
+│   ├── css/style.css
+│   ├── js/
+│   │   ├── app.js            # Main app logic
+│   │   ├── bluetooth.js      # Web Bluetooth API
+│   │   └── joystick.js       # Canvas joystick
+│   ├── manifest.json         # PWA manifest
+│   └── service-worker.js     # Offline support
+├── .github/workflows/
+│   └── deploy.yml            # Auto-deploy to Pages
+└── platformio.ini
 ```
 
-## Troubleshooting
+### Local Development
 
-**Wiimote won't connect:**
-- Ensure batteries are fresh
-- Press 1+2 within range (< 10m)
-- ESP32 Bluetooth must be enabled
-- Check Serial Monitor for connection status
+1. **ESP32 Development:**
+   ```bash
+   pio run                    # Compile
+   pio run --target upload    # Upload to ESP32
+   pio device monitor         # View serial output
+   ```
+
+2. **Web Interface Development:**
+   - Open `docs/index.html` in a local web server
+   - Must use HTTPS for Web Bluetooth to work
+   - Use `python -m http.server 8000` + ngrok for local testing
+
+### Deploy to GitHub Pages
+
+1. Push to `web-bluetooth-control` branch
+2. GitHub Actions will automatically deploy `docs/` folder
+3. Enable Pages in repo settings: Settings → Pages → Source: GitHub Actions
+
+## 🐛 Troubleshooting
+
+**ESP32 not showing up in Bluetooth list:**
+- Ensure ESP32 is powered and firmware is loaded
+- Check serial monitor for "BLE сервер запущен"
+- Try restarting ESP32
+
+**"Bluetooth is not available" error:**
+- Use Chrome or Edge (not Firefox or Safari)
+- Ensure HTTPS (GitHub Pages provides this)
+- Check browser supports Web Bluetooth: https://caniuse.com/web-bluetooth
 
 **Motors run wrong direction:**
-- Calibrate using WiFi version (`main` branch)
-- Or manually edit EEPROM in `loadConfig()` function
+- Use Calibration tab to configure motor mapping
+- Enable "Реверс" checkboxes for inverted motors
+- Save settings to EEPROM
 
 **Robot moves diagonally instead of straight:**
 - Check motor calibration
 - Ensure all motors are same type/speed
 - Verify X-configuration wiring
 
-## Serial Monitor Output
+## 📚 Branch Information
 
-```
-=================================
-   ESP32 Omni Robot Controller
-   Nintendo Wii Remote Edition
-=================================
+This is the **`web-bluetooth-control`** branch:
+- **Control Method**: Web Bluetooth API (browser-based)
+- **Platform**: Android, Windows, macOS, Linux (Chrome)
+- **Interface**: Progressive Web App on GitHub Pages
 
-Конфигурация загружена из EEPROM:
-  Маппинг: [1, 2, 3, 4]
-  Инверсия: [0, 0, 0, 0]
+### Other Branches:
 
-✓ Моторы инициализированы
-✓ Wiimote инициализирован
+- **`main`**: WiFi + WebSocket version (full platform support)
+  ```bash
+  git checkout main
+  ```
 
-=================================
-Нажми 1+2 на Wiimote для подключения
-=================================
+- **`wiimote-control`**: Nintendo Wii Remote version (Bluetooth Classic)
+  ```bash
+  git checkout wiimote-control
+  ```
 
-Управление (Wiimote в ГОРИЗОНТАЛЬНОМ положении):
-  D-pad ←   = Вперёд
-  D-pad →   = Назад
-  ...
-```
+## 🎯 Why Web Bluetooth?
 
-## Branch Information
+**Pros:**
+- ✅ No app installation required
+- ✅ Cross-platform (Android, Windows, macOS, Linux)
+- ✅ Easy updates (just refresh page)
+- ✅ Lower power consumption than WiFi
+- ✅ Works offline after first load (PWA)
 
-This is the **`wiimote-control`** branch:
-- **Control Method**: Nintendo Wii Remote via Bluetooth
-- **No WiFi required**
-- **No web interface**
+**Cons:**
+- ❌ No iOS Safari support
+- ❌ Requires HTTPS
+- ❌ Limited to Chrome/Edge browsers
 
-For the **WiFi web interface version**, see the `main` branch:
-```bash
-git checkout main
-```
-
-## License
+## 📄 License
 
 MIT
 
-## Credits
+## 🙏 Credits
 
-- ESP32Wiimote library by [bigw00d](https://github.com/bigw00d/ESP32Wiimote)
-- Built with PlatformIO and ESP32 Arduino Core
+- ESP32 Arduino Core BLE library
+- Web Bluetooth Community Group
+- Built with PlatformIO
 
 ---
 
-**Created for omni-directional robot platform with ESP32, TA6586 drivers, and Nintendo Wii Remote** 🤖🎮
+**🤖 Created for omni-directional robot platform with ESP32, TA6586 drivers, and Web Bluetooth API**
+
+Need help? Check the [CLAUDE.md](CLAUDE.md) for development guidelines or open an issue!
