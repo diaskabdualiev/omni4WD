@@ -216,15 +216,15 @@ void moveBackward() {
 void strafeLeft() {
   setMotor(1, -currentSpeed);
   setMotor(2, currentSpeed);
-  setMotor(3, -currentSpeed);  // Исправлено: было currentSpeed
-  setMotor(4, currentSpeed);   // Исправлено: было -currentSpeed
+  setMotor(3, currentSpeed);
+  setMotor(4, -currentSpeed);
 }
 
 void strafeRight() {
   setMotor(1, currentSpeed);
   setMotor(2, -currentSpeed);
-  setMotor(3, currentSpeed);   // Исправлено: было -currentSpeed
-  setMotor(4, -currentSpeed);  // Исправлено: было currentSpeed
+  setMotor(3, -currentSpeed);
+  setMotor(4, currentSpeed);
 }
 
 void rotateLeft() {
@@ -243,7 +243,7 @@ void rotateRight() {
 
 void handleJoystick(int8_t x, int8_t y) {
   // Преобразовать int8_t (-128..127) в -255..255
-  int scaledX = map(x, -128, 127, -255, 255);
+  int scaledX = map(x, -128, 127, 255, -255);  // Инвертирован X (право->лево)
   int scaledY = map(y, -128, 127, -255, 255);
 
   // X-конфигурация омни-платформы
@@ -253,18 +253,17 @@ void handleJoystick(int8_t x, int8_t y) {
   //         ╱╲
   //     M3 ↙  ↘ M4
   //
-  // Правильные формулы для X-конфигурации:
-  // M1 = Y+X, M2 = Y-X, M3 = Y+X, M4 = Y-X
-  // (M1=M3, M2=M4 - это правильно для holonomic drive!)
+  // Формулы для джойстика (без rotation):
+  // M1 = Y+X, M2 = Y-X, M3 = Y-X, M4 = Y+X
   //
   // Проверка:
   // - Forward (Y=1, X=0): M1=1, M2=1, M3=1, M4=1 ✓
-  // - Strafe Left (Y=0, X=-1): M1=-1, M2=1, M3=-1, M4=1 ✓
-  // - Strafe Right (Y=0, X=1): M1=1, M2=-1, M3=1, M4=-1 ✓
+  // - Strafe Left (Y=0, X=-1): M1=-1, M2=1, M3=1, M4=-1 ✓
+  // - Strafe Right (Y=0, X=1): M1=1, M2=-1, M3=-1, M4=1 ✓
   int m1 = constrain(scaledY + scaledX, -255, 255);
   int m2 = constrain(scaledY - scaledX, -255, 255);
-  int m3 = constrain(scaledY + scaledX, -255, 255);  // Как M1 (было M2!)
-  int m4 = constrain(scaledY - scaledX, -255, 255);  // Как M2 (было M1!)
+  int m3 = constrain(scaledY - scaledX, -255, 255);  // Как M2
+  int m4 = constrain(scaledY + scaledX, -255, 255);  // Как M1
 
   setMotor(1, m1);
   setMotor(2, m2);
