@@ -10,6 +10,9 @@ class RobotBluetooth {
     this.service = null;
     this.characteristics = {};
 
+    // Mutex для предотвращения конфликтов BLE операций
+    this.isBusy = false;
+
     // BLE UUIDs (must match ESP32 firmware)
     this.SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
     this.CHAR_UUIDS = {
@@ -114,12 +117,20 @@ class RobotBluetooth {
       return;
     }
 
+    // Пропускаем если предыдущая операция еще выполняется
+    if (this.isBusy) {
+      return;
+    }
+
+    this.isBusy = true;
     try {
       const encoder = new TextEncoder();
       await this.characteristics.command.writeValue(encoder.encode(command));
       console.log('[BLE] Command sent:', command);
     } catch (error) {
       console.error('[BLE] Failed to send command:', error);
+    } finally {
+      this.isBusy = false;
     }
   }
 
@@ -134,6 +145,12 @@ class RobotBluetooth {
       return;
     }
 
+    // Пропускаем если предыдущая операция еще выполняется
+    if (this.isBusy) {
+      return;
+    }
+
+    this.isBusy = true;
     try {
       // Convert -255..255 to -128..127 (int8_t range)
       const xByte = Math.round(Math.max(-128, Math.min(127, x * 127 / 255)));
@@ -146,6 +163,8 @@ class RobotBluetooth {
       console.log(`[BLE] Joystick: x=${xByte}, y=${yByte}`);
     } catch (error) {
       console.error('[BLE] Failed to send joystick data:', error);
+    } finally {
+      this.isBusy = false;
     }
   }
 
@@ -200,12 +219,20 @@ class RobotBluetooth {
       return;
     }
 
+    // Пропускаем если предыдущая операция еще выполняется
+    if (this.isBusy) {
+      return;
+    }
+
+    this.isBusy = true;
     try {
       const encoder = new TextEncoder();
       await this.characteristics.test.writeValue(encoder.encode(command));
       console.log('[BLE] Test command sent:', command);
     } catch (error) {
       console.error('[BLE] Failed to send test command:', error);
+    } finally {
+      this.isBusy = false;
     }
   }
 
