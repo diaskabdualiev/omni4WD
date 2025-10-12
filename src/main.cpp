@@ -247,9 +247,10 @@ void handleJoystick(int8_t x, int8_t y) {
   int scaledY = map(y, -128, 127, -255, 255);
 
   // X-конфигурация омни-платформы
-  // Y = вперёд/назад, X = вращение
-  int m1 = constrain(scaledY - scaledX, -255, 255);
-  int m2 = constrain(scaledY + scaledX, -255, 255);
+  // Y = вперёд/назад, X = стрейф влево/вправо
+  // Формула: M1,M4 зависят от Y+X; M2,M3 зависят от Y-X
+  int m1 = constrain(scaledY + scaledX, -255, 255);
+  int m2 = constrain(scaledY - scaledX, -255, 255);
   int m3 = constrain(scaledY - scaledX, -255, 255);
   int m4 = constrain(scaledY + scaledX, -255, 255);
 
@@ -310,6 +311,7 @@ class JoystickCallbacks: public BLECharacteristicCallbacks {
     if (len == 2) {
       int8_t x = (int8_t)data[0];
       int8_t y = (int8_t)data[1];
+      Serial.printf("Joystick: x=%d, y=%d\n", x, y);
       handleJoystick(x, y);
     }
   }

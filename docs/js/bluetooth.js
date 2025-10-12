@@ -142,8 +142,8 @@ class RobotBluetooth {
       const data = new Int8Array([xByte, yByte]);
       await this.characteristics.joystick.writeValue(data);
 
-      // Uncomment for debugging
-      // console.log(`[BLE] Joystick: x=${xByte}, y=${yByte}`);
+      // Debug logging
+      console.log(`[BLE] Joystick: x=${xByte}, y=${yByte}`);
     } catch (error) {
       console.error('[BLE] Failed to send joystick data:', error);
     }
