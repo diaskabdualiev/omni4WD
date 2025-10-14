@@ -50,13 +50,32 @@ Motors arranged in X-pattern (viewed from top):
     M3 ↙  ↘ M4
 ```
 
-Movement logic (src/main.cpp:212-252):
+**Button-based Movement Commands** (src/main.cpp:202-242):
 - **Forward**: All motors +speed
 - **Backward**: All motors -speed
 - **Strafe Left**: M1,M4 negative; M2,M3 positive
 - **Strafe Right**: M1,M4 positive; M2,M3 negative
 - **Rotate Left**: M2,M4 positive; M1,M3 negative
 - **Rotate Right**: M1,M3 positive; M2,M4 negative
+
+**Joystick Vector Control** (src/main.cpp:254-289):
+The robot supports two drive modes for joystick control:
+
+1. **Omni Mode (Strafe)** - `omniMode = true` (default):
+   - X-axis: Strafe left/right (sideways movement)
+   - Y-axis: Forward/backward
+   - Formulas: `M1=Y+X, M2=Y-X, M3=Y+X, M4=Y-X`
+   - When joystick full right: Robot strafes right
+   - Ideal for precise positioning with omni wheels
+
+2. **Tank Mode (Rotation)** - `omniMode = false`:
+   - X-axis: Rotate left/right (turn in place)
+   - Y-axis: Forward/backward
+   - Formulas: `M1=Y+X, M2=Y-X, M3=Y-X, M4=Y+X`
+   - When joystick full right: Robot rotates clockwise
+   - Behaves like traditional tank/differential drive
+
+Mode can be switched via commands `mode_omni` / `mode_tank` and is saved to EEPROM.
 
 ## Architecture
 
@@ -69,10 +88,11 @@ Three-layer motor control system:
 ### Configuration System
 - **Motor Mapping**: Maps logical positions (0-3) to physical motors (1-4)
 - **Motor Inversion**: Per-motor direction reversal
+- **Drive Mode**: Omni (strafe) vs Tank (rotation) for joystick control
 - **Storage**: Persisted to ESP32 NVS using Preferences library
-- **Default**: Direct mapping (logical N → physical N+1)
+- **Default**: Direct mapping (logical N → physical N+1), Omni mode enabled
 
-Configuration keys in EEPROM: `map0-map3` (int), `inv0-inv3` (bool)
+Configuration keys in EEPROM: `map0-map3` (int), `inv0-inv3` (bool), `omniMode` (bool)
 
 ### Web Interface
 Single-page application with two tabs embedded in PROGMEM (src/main.cpp:398-1115):
@@ -173,7 +193,7 @@ This branch implements browser-based control using the Web Bluetooth API, provid
 1. **Command Characteristic** (`beb5483e-36e1-4688-b7f5-ea07361b26a8`)
    - Type: Write
    - Format: UTF-8 string
-   - Commands: `forward`, `backward`, `strafe_left`, `strafe_right`, `rotate_left`, `rotate_right`, `stop`
+   - Commands: `forward`, `backward`, `strafe_left`, `strafe_right`, `rotate_left`, `rotate_right`, `stop`, `mode_omni`, `mode_tank`
 
 2. **Joystick Characteristic** (`ca73b3ba-39f6-4ab3-91ae-186dc9577d99`)
    - Type: Write
@@ -187,7 +207,7 @@ This branch implements browser-based control using the Web Bluetooth API, provid
 
 4. **Config Characteristic** (`d4e1f1a2-8b5c-4d3e-9f7a-6c8b5a4d3e2f`)
    - Type: Read/Write/Notify
-   - Format: JSON string `{"mapping":[1,2,3,4],"invert":[false,false,false,false]}`
+   - Format: JSON string `{"mapping":[1,2,3,4],"invert":[false,false,false,false],"omniMode":true}`
    - Special commands: `save`, `reset`, `set_map:{pos}:{motor}`, `set_inv:{pos}:{0|1}`
 
 5. **Test Motor Characteristic** (`a3b2c1d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d`)
@@ -218,6 +238,8 @@ docs/
 - Handles client connection/disconnection with automatic motor stop
 - Same motor control logic as other branches (TA6586 asymmetric PWM)
 - Joystick input mapped from int8_t (-128..127) to motor speed (-255..255)
+- Vector-based joystick control with two drive modes (Omni/Tank)
+- Drive mode persisted to EEPROM and loaded on boot
 
 **Web Bluetooth API** (docs/js/bluetooth.js):
 - `RobotBluetooth` class wraps all BLE communication
@@ -228,10 +250,19 @@ docs/
 
 **Canvas Joystick** (docs/js/joystick.js):
 - `Joystick` class renders interactive control on canvas
-- Supports both touch and mouse events
+- Supports both touch and mouse events (including `touchcancel` for reliability)
 - Calculates polar coordinates and clamps to circular boundary
 - Outputs -255..255 range for x/y axes
 - Auto-returns to center with visual feedback
+- Sends `joystick(0,0)` + `stop` command on release to ensure motors stop
+
+**Web Interface Controls** (docs/index.html):
+- **Mode Switcher**: Toggle between Joystick and Button control
+- **Drive Mode Switcher**: Toggle between Omni (strafe) and Tank (rotation)
+- **Joystick Mode**: Full vector control - Y-axis for forward/back, X-axis for strafe/rotate (depends on drive mode)
+- **Button Mode**: Discrete directional controls - left/right buttons adapt to current drive mode
+- Dynamic UI hints showing current behavior (e.g., "влево/вправо: стрейф" or "влево/вправо: разворот")
+- Drive mode preference saved with calibration settings
 
 **Progressive Web App**:
 - Installable to home screen via manifest.json
@@ -247,7 +278,7 @@ docs/
 - Deploys `docs/` folder to GitHub Pages
 - Requires Pages enabled in repo settings (Settings → Pages → Source: GitHub Actions)
 
-**Deployment URL**: `https://{username}.github.io/{repo}/`
+**Deployment URL**: `https://asdasddasd-wheat.vercel.app/` (via Vercel)
 
 ### Browser Compatibility
 

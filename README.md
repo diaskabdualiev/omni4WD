@@ -6,7 +6,9 @@ Progressive Web App для управления 4-колесным omni-робо
 
 - **🌐 Web Bluetooth API**: Управление прямо из браузера без установки приложений
 - **📱 Progressive Web App**: Установи на домашний экран, работает офлайн
-- **🎮 Два режима управления**: Джойстик (canvas) и кнопочный
+- **🕹️ Векторное управление джойстиком**: Полный контроль с двумя режимами вождения
+- **🔄 Omni/Tank режимы**: Переключение между стрейфом и разворотом
+- **🎮 Два интерфейса**: Джойстик (canvas) и кнопочный
 - **⚙️ Калибровка моторов**: Визуальный 2x2 grid для настройки
 - **💾 Persistent Settings**: Конфигурация сохраняется в ESP32 EEPROM
 - **🔋 Низкое энергопотребление**: BLE экономичнее WiFi
@@ -88,16 +90,21 @@ pio device monitor
 
 ### Control Tab
 
+**Drive Mode Selection:**
+- **🔄 Omni (Strafe)**: X-axis = sideways movement, perfect for precise positioning
+- **🎯 Tank (Rotation)**: X-axis = rotation, traditional tank controls
+
 **Joystick Mode (Default):**
-- Drag the joystick to control movement and rotation
-- Left/Right = robot rotation
-- Up/Down = forward/backward
-- Use ⟲⟳ buttons for strafing left/right
+- Drag the joystick for full vector control
+- **Y-axis** (Up/Down): Forward/Backward movement
+- **X-axis** (Left/Right): Strafe or Rotation (depends on selected drive mode)
+- Auto-return to center with motor stop
 
 **Button Mode:**
 - ⬆️ Forward | ⬇️ Backward
-- ⬅️ Rotate Left | ➡️ Rotate Right
-- ⟲ Strafe Left | ⟳ Strafe Right
+- ⬅️➡️ Dynamic buttons (adapt to Omni/Tank mode)
+  - **Omni mode**: Strafe left/right
+  - **Tank mode**: Rotate left/right
 - ⏹️ Emergency Stop
 
 ### Calibration Tab
@@ -114,10 +121,10 @@ pio device monitor
 ```
 Service UUID: 4fafc201-1fb5-459e-8fcc-c5c9c331914b
 
-├── Command Characteristic (movement commands)
-├── Joystick Characteristic (x, y coordinates)
-├── Speed Characteristic (0-255)
-├── Config Characteristic (motor mapping & inversion)
+├── Command Characteristic (movement + mode_omni/mode_tank)
+├── Joystick Characteristic (x, y coordinates for vector control)
+├── Speed Characteristic (0-255 PWM)
+├── Config Characteristic (motor mapping, inversion, omniMode)
 └── Test Motor Characteristic (calibration)
 ```
 
@@ -143,14 +150,20 @@ Implemented in `setPhysicalMotor()` at `src/main.cpp:124-171`.
 
 ### Movement Algorithm
 
-X-configuration kinematics:
+X-configuration kinematics with dual drive modes:
 
+**Button Commands:**
 - **Forward**: All motors +speed
 - **Backward**: All motors -speed
 - **Strafe Left**: M1,M4 negative; M2,M3 positive
 - **Strafe Right**: M1,M4 positive; M2,M3 negative
 - **Rotate Left**: M2,M4 positive; M1,M3 negative
 - **Rotate Right**: M1,M3 positive; M2,M4 negative
+
+**Joystick Vector Control:**
+- **Omni Mode**: `M1=Y+X, M2=Y-X, M3=Y+X, M4=Y-X` (strafe)
+- **Tank Mode**: `M1=Y+X, M2=Y-X, M3=Y-X, M4=Y+X` (rotation)
+- Mode persisted to EEPROM and loaded on boot
 
 ## 🏗️ Development
 
