@@ -43,7 +43,7 @@ pio device monitor
 
 Откройте в Chrome (или другом поддерживаемом браузере):
 
-**🌐 https://diaskabdualiev.github.io/omni4WD/**
+**🌐 https://asdasddasd.vercel.app/**
 
 ### 3. Подключиться к роботу
 
