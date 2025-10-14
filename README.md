@@ -43,11 +43,7 @@ pio device monitor
 
 Откройте в Chrome (или другом поддерживаемом браузере):
 
-```
-https://yourusername.github.io/asdasddasd/
-```
-
-*(Замените `yourusername` на ваш GitHub username)*
+**🌐 https://diaskabdualiev.github.io/omni4WD/**
 
 ### 3. Подключиться к роботу
 
