@@ -43,7 +43,7 @@ pio device monitor
 
 Откройте в Chrome (или другом поддерживаемом браузере):
 
-**🌐 https://asdasddasd.vercel.app/**
+**🌐 https://asdasddasd-wheat.vercel.app/**
 
 ### 3. Подключиться к роботу
 
