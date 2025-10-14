@@ -202,6 +202,12 @@ class RobotBluetooth {
       const json = new TextDecoder().decode(value);
       const config = JSON.parse(json);
       console.log('[BLE] Config read:', config);
+
+      // Trigger callback to update UI
+      if (this.onConfigReceived) {
+        this.onConfigReceived(config);
+      }
+
       return config;
     } catch (error) {
       console.error('[BLE] Failed to read config:', error);

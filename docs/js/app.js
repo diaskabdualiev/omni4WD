@@ -193,7 +193,7 @@ function updateMapping(pos) {
 
 function updateInvert(pos) {
   const value = document.getElementById('inv' + pos).checked;
-  const command = `set_inv:${pos}:${value}`;
+  const command = `set_inv:${pos}:${value ? 1 : 0}`;
   console.log('[App] Sending invert command:', command);
 
   if (robot && robot.isConnected()) {
