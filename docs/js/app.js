@@ -217,7 +217,7 @@ function saveSettings() {
 
   // Wait a bit for commands to be sent
   setTimeout(() => {
-    robot.sendConfigCommand('save_config');
+    robot.sendConfigCommand('save');
     alert('💾 Настройки сохранены в память ESP32!');
   }, 500);
 }

@@ -237,18 +237,18 @@ class RobotBluetooth {
   }
 
   /**
-   * Send config command (set_map, set_inv, save_config)
+   * Send config command (set_map, set_inv, save, reset)
    * @param {string} command - Configuration command string
    */
   async sendConfigCommand(command) {
-    if (!this.characteristics.command) {
-      console.warn('[BLE] Command characteristic not available');
+    if (!this.characteristics.config) {
+      console.warn('[BLE] Config characteristic not available');
       return;
     }
 
     try {
       const encoder = new TextEncoder();
-      await this.characteristics.command.writeValue(encoder.encode(command));
+      await this.characteristics.config.writeValue(encoder.encode(command));
       console.log('[BLE] Config command sent:', command);
     } catch (error) {
       console.error('[BLE] Failed to send config command:', error);
