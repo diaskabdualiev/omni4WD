@@ -37,6 +37,7 @@ class Joystick {
     this.canvas.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
     this.canvas.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
     this.canvas.addEventListener('touchend', (e) => this.handleTouchEnd(e), { passive: false });
+    this.canvas.addEventListener('touchcancel', (e) => this.handleTouchEnd(e), { passive: false });
 
     // Mouse events
     this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));

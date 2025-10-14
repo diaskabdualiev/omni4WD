@@ -76,6 +76,7 @@ function initJoystick() {
 
   joystick.onStop = () => {
     if (robot && robot.isConnected()) {
+      robot.sendJoystick(0, 0);
       robot.sendCommand('stop');
     }
   };
