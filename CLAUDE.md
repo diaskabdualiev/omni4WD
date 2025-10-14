@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ESP32-based omni-directional robot controller with 4 DC motors in X-configuration, using TA6586 H-bridge motor drivers. Features a web interface for control and motor calibration.
+ESP32-based omni-directional robot controller with 4 DC motors in X-configuration, using TA6586 H-bridge motor drivers. **Wiimote-Control Branch**: Nintendo Wii Remote control via Bluetooth Classic.
 
 ## Build & Upload Commands
 
@@ -50,13 +50,33 @@ Motors arranged in X-pattern (viewed from top):
     M3 ↙  ↘ M4
 ```
 
-Movement logic (src/main.cpp:212-252):
+Movement logic (src/main.cpp:262-292):
 - **Forward**: All motors +speed
 - **Backward**: All motors -speed
-- **Strafe Left**: M1,M4 negative; M2,M3 positive
-- **Strafe Right**: M1,M4 positive; M2,M3 negative
-- **Rotate Left**: M2,M4 positive; M1,M3 negative
-- **Rotate Right**: M1,M3 positive; M2,M4 negative
+- **Strafe Left**: M1-, M2+, M3+, M4- (D-pad UP)
+- **Strafe Right**: M1+, M2-, M3-, M4+ (D-pad DOWN)
+- **Rotate Left**: M1-, M2+, M3-, M4+ (Button B/1)
+- **Rotate Right**: M1+, M2-, M3+, M4- (Button A/2)
+
+## Wiimote Controls (Horizontal Orientation)
+
+**Movement (D-Pad):**
+- LEFT (←): Forward
+- RIGHT (→): Backward
+- UP (↑): Strafe Left
+- DOWN (↓): Strafe Right
+
+**Rotation (Buttons):**
+- A / 2: Rotate Right
+- B / 1: Rotate Left
+
+**Speed Control:**
+- PLUS (+): Increase speed by 25 (max 255)
+- MINUS (-): Decrease speed by 25 (min 50)
+- Speed changes limited to 200ms intervals to prevent rapid changes
+
+**Safety:**
+- HOME: Emergency stop (highest priority)
 
 ## Architecture
 
@@ -74,43 +94,24 @@ Three-layer motor control system:
 
 Configuration keys in EEPROM: `map0-map3` (int), `inv0-inv3` (bool)
 
-### Web Interface
-Single-page application with two tabs embedded in PROGMEM (src/main.cpp:398-1115):
+### Wiimote Input System
 
-**Control Tab**:
-- Two-column layout (directions on left, rotation on right)
-- Speed slider (0-255 PWM)
-- Emergency stop button
+**Vector-Based Movement** (src/main.cpp:258-307):
+- Multiple buttons can be pressed simultaneously
+- Each button adds its contribution to motor speeds (float -1.0 to +1.0)
+- Motor speeds are normalized to prevent overcurrent
+- Final speeds scaled by `currentSpeed` (adjustable via +/- buttons)
 
-**Calibration Tab**:
-- 2×2 visual grid matching physical robot layout
-- Per-motor testing (forward/backward buttons)
-- Interactive motor mapping and direction inversion
-- Save to EEPROM functionality
+**Button State Detection**:
+- Uses 16-bit bitmask from ESP32Wiimote library
+- Detects state changes for debug output
+- HOME button has highest priority (immediate stop)
 
-### WebSocket Protocol
-Text-based commands over WebSocket (`/ws`):
-
-**Movement**: `forward`, `backward`, `left`, `right`, `rotate_left`, `rotate_right`, `stop`
-
-**Calibration**: `test_{0-3}_{fwd|bwd|stop}` (tests logical motor at position)
-
-**Configuration**:
-- `get_config` → returns JSON `{mapping:[...], invert:[...]}`
-- `set_map:{pos}:{motor}` → map logical position to physical motor
-- `set_inv:{pos}:{true|false}` → set direction inversion
-- `save_config` → persist to EEPROM
-- `reset_config` → restore defaults
-
-**Speed**: `speed:{0-255}` → set current speed
-
-## WiFi Configuration
-
-Default credentials (src/main.cpp:10-11):
-- SSID: `DiasPhone`
-- Password: `diasdias`
-
-After successful connection, web interface available at ESP32's IP address (printed to serial).
+**Speed Change Debouncing**:
+- 200ms minimum interval between speed changes
+- Prevents accidental rapid changes
+- Speed range: 50-255 (min-max)
+- Step size: 25 per button press
 
 ## PWM Settings
 
@@ -125,22 +126,26 @@ After successful connection, web interface available at ESP32's IP address (prin
 
 2. **10μs delay between D1 and PWM changes** to ensure driver registers direction before speed
 
-3. **Motor mapping affects calibration commands**: `test_N` commands operate on logical positions, which are remapped to physical motors
+3. **Motor mapping affects all movement**: Logical positions are remapped to physical motors
 
-4. **WebSocket disconnection triggers motor stop** for safety (src/main.cpp:384-385)
+4. **Vector normalization prevents overcurrent**: When multiple buttons pressed, motor speeds scaled proportionally
 
-5. **HTML is in PROGMEM**: The entire web interface is compiled into flash memory as a raw string literal
+5. **Speed control debouncing**: 200ms minimum interval prevents rapid uncontrolled changes
 
 ## Common Modifications
 
-### Changing WiFi credentials
-Edit lines 10-11 in src/main.cpp
-
 ### Adjusting motor pin assignments
-Modify `#define MOTOR{1-4}_D{0,1}` at src/main.cpp:15-24
+Modify `#define MOTOR{1-4}_D{0,1}` at src/main.cpp:8-17
 
 ### Changing PWM frequency
-Modify `PWM_FREQ` at src/main.cpp:27 (affects motor smoothness and noise)
+Modify `PWM_FREQ` at src/main.cpp:20 (affects motor smoothness and noise)
 
-### Modifying web interface
-Edit the `index_html[]` PROGMEM string starting at src/main.cpp:398
+### Adjusting speed control parameters
+- `SPEED_STEP` (line 51): Amount to increase/decrease per button press (default: 25)
+- `SPEED_CHANGE_INTERVAL` (line 50): Minimum ms between changes (default: 200)
+- Min speed: 50 (line 252)
+- Max speed: 255 (line 248)
+- Default speed: 200 (line 36)
+
+### Button remapping
+Edit button conditions in `handleWiimoteInput()` at src/main.cpp:262-292

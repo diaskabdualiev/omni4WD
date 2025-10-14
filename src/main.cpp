@@ -45,6 +45,11 @@ bool motorInvert[4] = {false, false, false, false};  // Инверсия нап�
 // Состояние кнопок для детекции изменений
 uint16_t lastButtonState = 0;
 
+// Для контроля скорости изменения скорости
+unsigned long lastSpeedChangeTime = 0;
+const int SPEED_CHANGE_INTERVAL = 200;  // мс между изменениями
+const int SPEED_STEP = 25;  // шаг изменения скорости
+
 // ==================== ФУНКЦИИ РАБОТЫ С НАСТРОЙКАМИ ====================
 
 void loadConfig() {
@@ -236,6 +241,20 @@ void handleWiimoteInput() {
       return;
     }
 
+    // Управление скоростью кнопками +/-
+    unsigned long currentTime = millis();
+    if (currentTime - lastSpeedChangeTime > SPEED_CHANGE_INTERVAL) {
+      if (button & ESP32Wiimote::BUTTON_PLUS) {
+        currentSpeed = min(255, currentSpeed + SPEED_STEP);
+        lastSpeedChangeTime = currentTime;
+        Serial.printf("⚡ Скорость увеличена: %d\n", currentSpeed);
+      } else if (button & ESP32Wiimote::BUTTON_MINUS) {
+        currentSpeed = max(50, currentSpeed - SPEED_STEP);
+        lastSpeedChangeTime = currentTime;
+        Serial.printf("⚡ Скорость уменьшена: %d\n", currentSpeed);
+      }
+    }
+
     // Векторное сложение движений для комбинированного управления
     // Позволяет нажимать несколько кнопок одновременно (например, вперёд + стрейф)
     float motor1 = 0, motor2 = 0, motor3 = 0, motor4 = 0;
@@ -259,36 +278,36 @@ void handleWiimoteInput() {
       motor4 -= 1.0;
     }
 
-    // Поворот
+    // Стрейф (D-pad UP/DOWN для горизонтального Wiimote)
     if (button & ESP32Wiimote::BUTTON_UP) {
-      // Поворот влево: M1-, M2+, M3-, M4+
+      // Стрейф влево: M1-, M2+, M3+, M4-
       motor1 -= 1.0;
       motor2 += 1.0;
-      motor3 -= 1.0;
-      motor4 += 1.0;
-    }
-    if (button & ESP32Wiimote::BUTTON_DOWN) {
-      // Поворот вправо: M1+, M2-, M3+, M4-
-      motor1 += 1.0;
-      motor2 -= 1.0;
       motor3 += 1.0;
       motor4 -= 1.0;
     }
-
-    // Стрейф (кнопки A, B, 1, 2)
-    if ((button & ESP32Wiimote::BUTTON_A) || (button & ESP32Wiimote::BUTTON_TWO)) {
+    if (button & ESP32Wiimote::BUTTON_DOWN) {
       // Стрейф вправо: M1+, M2-, M3-, M4+
       motor1 += 1.0;
       motor2 -= 1.0;
       motor3 -= 1.0;
       motor4 += 1.0;
     }
-    if ((button & ESP32Wiimote::BUTTON_B) || (button & ESP32Wiimote::BUTTON_ONE)) {
-      // Стрейф влево: M1-, M2+, M3+, M4-
-      motor1 -= 1.0;
-      motor2 += 1.0;
+
+    // Поворот (кнопки A, B, 1, 2)
+    if ((button & ESP32Wiimote::BUTTON_A) || (button & ESP32Wiimote::BUTTON_TWO)) {
+      // Поворот вправо: M1+, M2-, M3+, M4-
+      motor1 += 1.0;
+      motor2 -= 1.0;
       motor3 += 1.0;
       motor4 -= 1.0;
+    }
+    if ((button & ESP32Wiimote::BUTTON_B) || (button & ESP32Wiimote::BUTTON_ONE)) {
+      // Поворот влево: M1-, M2+, M3-, M4+
+      motor1 -= 1.0;
+      motor2 += 1.0;
+      motor3 -= 1.0;
+      motor4 += 1.0;
     }
 
     // Нормализация и применение скорости
@@ -359,15 +378,18 @@ void setup() {
   Serial.println("Управление (Wiimote в ГОРИЗОНТАЛЬНОМ положении):");
   Serial.println("  D-pad ←   = Вперёд");
   Serial.println("  D-pad →   = Назад");
-  Serial.println("  D-pad ↑   = Поворот влево");
-  Serial.println("  D-pad ↓   = Поворот вправо");
-  Serial.println("  Кнопка A  = Стрейф вправо");
-  Serial.println("  Кнопка B  = Стрейф влево");
-  Serial.println("  Кнопка 1  = Стрейф влево (дублирует B)");
-  Serial.println("  Кнопка 2  = Стрейф вправо (дублирует A)");
+  Serial.println("  D-pad ↑   = Стрейф влево");
+  Serial.println("  D-pad ↓   = Стрейф вправо");
+  Serial.println("  Кнопка A  = Поворот вправо");
+  Serial.println("  Кнопка B  = Поворот влево");
+  Serial.println("  Кнопка 1  = Поворот влево (дублирует B)");
+  Serial.println("  Кнопка 2  = Поворот вправо (дублирует A)");
+  Serial.println("  Кнопка +  = Увеличить скорость");
+  Serial.println("  Кнопка -  = Уменьшить скорость");
   Serial.println("  Кнопка HOME = АВАРИЙНАЯ ОСТАНОВКА");
   Serial.println("\n✨ Можно нажимать несколько кнопок одновременно!");
   Serial.println("   Например: ← + A = движение по диагонали");
+  Serial.printf("\n⚡ Текущая скорость: %d (диапазон: 50-255)\n", currentSpeed);
   Serial.println("\n=================================\n");
 }
 

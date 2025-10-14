@@ -68,14 +68,18 @@ Hold your Wiimote **horizontally** like a TV remote:
 **D-Pad Movement:**
 - **← (Left)** → Forward 🚗
 - **→ (Right)** → Backward 🔙
-- **↑ (Up)** → Rotate Left ↶
-- **↓ (Down)** → Rotate Right ↷
+- **↑ (Up)** → Strafe Left ⬅️
+- **↓ (Down)** → Strafe Right ➡️
 
-**Strafe (Sideways) Movement:**
-- **A Button** → Strafe Right ➡️
-- **B Button** → Strafe Left ⬅️
-- **2 Button** → Strafe Right (same as A)
-- **1 Button** → Strafe Left (same as B)
+**Rotation (Turn in Place):**
+- **A Button** → Rotate Right ↷
+- **B Button** → Rotate Left ↶
+- **2 Button** → Rotate Right (same as A)
+- **1 Button** → Rotate Left (same as B)
+
+**Speed Control:**
+- **+ Button** → Increase Speed ⚡ (+25 per press, max 255)
+- **- Button** → Decrease Speed 🐌 (-25 per press, min 50)
 
 **Emergency:**
 - **HOME Button** → 🛑 **EMERGENCY STOP**
@@ -84,11 +88,11 @@ Hold your Wiimote **horizontally** like a TV remote:
 
 You can press **multiple buttons at once** for advanced movements:
 
-- **← + A** = Diagonal forward-right ↗️
-- **← + B** = Diagonal forward-left ↖️
-- **→ + A** = Diagonal backward-right ↘️
-- **→ + B** = Diagonal backward-left ↙️
-- **← + ↑** = Forward while rotating left 🔄
+- **← + ↑** = Diagonal forward-left ↖️
+- **← + ↓** = Diagonal forward-right ↗️
+- **→ + ↑** = Diagonal backward-left ↙️
+- **→ + ↓** = Diagonal backward-right ↘️
+- **← + A** = Forward while rotating right 🔄
 - **Any combination!** = Vector sum of all inputs
 
 The system automatically normalizes motor speeds to prevent overcurrent.
@@ -120,9 +124,9 @@ This is implemented in `setPhysicalMotor()` function at `src/main.cpp:82-129`.
 The robot uses **vector-based movement** (see `src/main.cpp:239-307`):
 
 1. Each button adds its contribution to motor speeds
-2. Forward: All motors +1
-3. Strafe Right: M1+, M2-, M3-, M4+
-4. Rotation: Opposite pairs
+2. Forward/Backward (D-pad ←/→): All motors +1 or -1
+3. Strafe (D-pad ↑/↓): M1∓, M2±, M3±, M4∓ (sideways movement)
+4. Rotation (A/B buttons): M1±, M2∓, M3±, M4∓ (turn in place)
 5. Sum all inputs → Normalize to max speed → Apply to motors
 
 ### Motor Calibration
