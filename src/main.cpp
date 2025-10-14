@@ -55,6 +55,9 @@ Preferences preferences;
 // Текущая скорость (0-255)
 int currentSpeed = 200;
 
+// Режим управления: true = Omni (strafe), false = Tank (rotation)
+bool omniMode = true;
+
 // Конфигурация моторов
 int motorMapping[4] = {1, 2, 3, 4};
 bool motorInvert[4] = {false, false, false, false};
@@ -72,6 +75,8 @@ void loadConfig() {
     motorInvert[i] = preferences.getBool(key.c_str(), false);
   }
 
+  omniMode = preferences.getBool("omniMode", true);
+
   preferences.end();
 
   Serial.println("✓ Конфигурация загружена:");
@@ -87,6 +92,7 @@ void loadConfig() {
     if (i < 3) Serial.print(", ");
   }
   Serial.println("]");
+  Serial.printf("  Режим: %s\n", omniMode ? "Omni (strafe)" : "Tank (rotation)");
 }
 
 void saveConfig() {
@@ -99,6 +105,8 @@ void saveConfig() {
     key = "inv" + String(i);
     preferences.putBool(key.c_str(), motorInvert[i]);
   }
+
+  preferences.putBool("omniMode", omniMode);
 
   preferences.end();
   Serial.println("✓ Конфигурация сохранена в EEPROM");
@@ -127,6 +135,8 @@ String getConfigJSON() {
     mapping.add(motorMapping[i]);
     invert.add(motorInvert[i]);
   }
+
+  doc["omniMode"] = omniMode;
 
   String output;
   serializeJson(doc, output);
@@ -247,23 +257,30 @@ void handleJoystick(int8_t x, int8_t y) {
   int scaledY = map(y, -128, 127, -255, 255);
 
   // X-конфигурация омни-платформы
-  // Y = вперёд/назад, X = стрейф влево/вправо
   //     M1 ↗  ↖ M2
   //         ╲╱
   //         ╱╲
   //     M3 ↙  ↘ M4
-  //
-  // Формулы для джойстика (без rotation):
-  // M1 = Y+X, M2 = Y-X, M3 = Y-X, M4 = Y+X
-  //
-  // Проверка:
-  // - Forward (Y=1, X=0): M1=1, M2=1, M3=1, M4=1 ✓
-  // - Strafe Left (Y=0, X=-1): M1=-1, M2=1, M3=1, M4=-1 ✓
-  // - Strafe Right (Y=0, X=1): M1=1, M2=-1, M3=-1, M4=1 ✓
-  int m1 = constrain(scaledY + scaledX, -255, 255);
-  int m2 = constrain(scaledY - scaledX, -255, 255);
-  int m3 = constrain(scaledY - scaledX, -255, 255);  // Как M2
-  int m4 = constrain(scaledY + scaledX, -255, 255);  // Как M1
+
+  int m1, m2, m3, m4;
+
+  if (omniMode) {
+    // OMNI MODE: X = стрейф влево/вправо, Y = вперёд/назад
+    // Формулы: M1=Y+X, M2=Y-X, M3=Y+X, M4=Y-X
+    // При X=max: диагональное движение (strafe)
+    m1 = constrain(scaledY + scaledX, -255, 255);
+    m2 = constrain(scaledY - scaledX, -255, 255);
+    m3 = constrain(scaledY + scaledX, -255, 255);
+    m4 = constrain(scaledY - scaledX, -255, 255);
+  } else {
+    // TANK MODE: X = разворот влево/вправо, Y = вперёд/назад
+    // Формулы: M1=Y+X, M2=Y-X, M3=Y-X, M4=Y+X
+    // При X=max: разворот на месте (rotation)
+    m1 = constrain(scaledY + scaledX, -255, 255);
+    m2 = constrain(scaledY - scaledX, -255, 255);
+    m3 = constrain(scaledY - scaledX, -255, 255);
+    m4 = constrain(scaledY + scaledX, -255, 255);
+  }
 
   setMotor(1, m1);
   setMotor(2, m2);
@@ -309,6 +326,12 @@ class CommandCallbacks: public BLECharacteristicCallbacks {
         rotateRight();
       } else if (command == "stop") {
         stopAllMotors();
+      } else if (command == "mode_omni") {
+        omniMode = true;
+        Serial.println("✓ Режим: Omni (strafe)");
+      } else if (command == "mode_tank") {
+        omniMode = false;
+        Serial.println("✓ Режим: Tank (rotation)");
       }
     }
   }

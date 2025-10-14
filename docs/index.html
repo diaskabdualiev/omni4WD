@@ -30,11 +30,16 @@
 
     <!-- Вкладка 1: Управление -->
     <div class="tab-content active" id="tab-control">
-      <!-- Переключатель режимов -->
+      <!-- Переключатель режимов управления и типа -->
       <div style="text-align:center; margin-bottom:20px;">
-        <div style="display:inline-flex; background:#f1f5f9; border-radius:8px; padding:4px;">
+        <div style="display:inline-flex; background:#f1f5f9; border-radius:8px; padding:4px; margin-bottom:10px;">
           <button id="modeJoystick" class="mode-btn active" onclick="switchMode('joystick')">🕹️ Джойстик</button>
           <button id="modeButtons" class="mode-btn" onclick="switchMode('buttons')">🎮 Кнопки</button>
+        </div>
+        <br>
+        <div style="display:inline-flex; background:#e0f2fe; border-radius:8px; padding:4px;">
+          <button id="driveOmni" class="mode-btn active" onclick="switchDriveMode('omni')">🔄 Omni (Strafe)</button>
+          <button id="driveTank" class="mode-btn" onclick="switchDriveMode('tank')">🎯 Tank (Rotation)</button>
         </div>
       </div>
 
@@ -46,56 +51,32 @@
 
       <!-- Режим джойстика -->
       <div id="joystick-mode" class="control-mode">
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:20px;">
-          <!-- Джойстик слева -->
-          <div>
-            <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Джойстик</h3>
-            <div style="position:relative; width:100%; padding-bottom:100%; background:#f8fafc; border-radius:12px; border:2px solid #e2e8f0;">
-              <canvas id="joystickCanvas" style="position:absolute; width:100%; height:100%; touch-action:none;"></canvas>
-            </div>
-          </div>
-
-          <!-- Стрейф справа -->
-          <div>
-            <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Стрейф</h3>
-            <div class="rotate-buttons">
-              <button class="btn" ontouchstart="sendCommand('strafe_left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('strafe_left')" onmouseup="sendCommand('stop')">⬅️</button>
-              <button class="btn" ontouchstart="sendCommand('strafe_right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('strafe_right')" onmouseup="sendCommand('stop')">➡️</button>
-            </div>
-          </div>
+        <div style="text-align:center; margin-bottom:10px; color:#64748b; font-size:13px;" id="joystickHint">
+          🕹️ Вверх/Вниз: движение • Влево/Вправо: <span id="joystickModeText">стрейф</span>
+        </div>
+        <div style="position:relative; width:100%; max-width:400px; margin:0 auto; padding-bottom:100%; background:#f8fafc; border-radius:12px; border:2px solid #e2e8f0;">
+          <canvas id="joystickCanvas" style="position:absolute; width:100%; height:100%; touch-action:none;"></canvas>
         </div>
       </div>
 
       <!-- Режим кнопок -->
       <div id="buttons-mode" class="control-mode" style="display:none;">
-        <div class="joystick-layout">
-        <!-- Левая половина: направления -->
-        <div>
-          <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Движение</h3>
-          <div class="control-grid">
-            <div class="btn empty"></div>
-            <button class="btn" ontouchstart="sendCommand('forward')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('forward')" onmouseup="sendCommand('stop')">⬆️</button>
-            <div class="btn empty"></div>
-
-            <button class="btn" ontouchstart="sendCommand('rotate_left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('rotate_left')" onmouseup="sendCommand('stop')">⬅️</button>
-            <button class="btn stop" onclick="sendCommand('stop')">⏹️</button>
-            <button class="btn" ontouchstart="sendCommand('rotate_right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('rotate_right')" onmouseup="sendCommand('stop')">➡️</button>
-
-            <div class="btn empty"></div>
-            <button class="btn" ontouchstart="sendCommand('backward')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('backward')" onmouseup="sendCommand('stop')">⬇️</button>
-            <div class="btn empty"></div>
-          </div>
+        <div style="text-align:center; margin-bottom:10px; color:#64748b; font-size:13px;" id="buttonsHint">
+          Влево/Вправо: <span id="buttonsModeText">стрейф</span>
         </div>
+        <div class="control-grid" style="max-width:300px; margin:0 auto;">
+          <div class="btn empty"></div>
+          <button class="btn" ontouchstart="sendCommand('forward')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('forward')" onmouseup="sendCommand('stop')">⬆️</button>
+          <div class="btn empty"></div>
 
-        <!-- Правая половина: стрейф -->
-        <div>
-          <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Стрейф</h3>
-          <div class="rotate-buttons">
-            <button class="btn" ontouchstart="sendCommand('strafe_left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('strafe_left')" onmouseup="sendCommand('stop')">⬅️</button>
-            <button class="btn" ontouchstart="sendCommand('strafe_right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('strafe_right')" onmouseup="sendCommand('stop')">➡️</button>
-          </div>
+          <button class="btn" id="btnLeft" ontouchstart="sendCommand('strafe_left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('strafe_left')" onmouseup="sendCommand('stop')">⬅️</button>
+          <button class="btn stop" onclick="sendCommand('stop')">⏹️</button>
+          <button class="btn" id="btnRight" ontouchstart="sendCommand('strafe_right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('strafe_right')" onmouseup="sendCommand('stop')">➡️</button>
+
+          <div class="btn empty"></div>
+          <button class="btn" ontouchstart="sendCommand('backward')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('backward')" onmouseup="sendCommand('stop')">⬇️</button>
+          <div class="btn empty"></div>
         </div>
-      </div>
       </div>
 
       <button class="emergency-stop" onclick="sendCommand('stop')">🛑 АВАРИЙНЫЙ СТОП</button>

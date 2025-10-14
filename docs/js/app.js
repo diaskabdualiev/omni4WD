@@ -5,6 +5,7 @@
 
 let robot = null;
 let joystick = null;
+let currentDriveMode = 'omni'; // 'omni' or 'tank'
 
 const statusEl = document.getElementById('status');
 const connectBtn = document.getElementById('connectBtn');
@@ -39,6 +40,12 @@ function init() {
   robot.onConfigReceived = (config) => {
     console.log('[App] Config received:', config);
     loadConfigToUI(config);
+
+    // Load drive mode
+    if (config.omniMode !== undefined) {
+      currentDriveMode = config.omniMode ? 'omni' : 'tank';
+      updateDriveModeUI();
+    }
   };
 
   // Connect button handler
@@ -171,6 +178,49 @@ function switchMode(mode) {
   sendCommand('stop');
 }
 
+function switchDriveMode(mode) {
+  currentDriveMode = mode;
+
+  if (robot && robot.isConnected()) {
+    robot.sendCommand(mode === 'omni' ? 'mode_omni' : 'mode_tank');
+  }
+
+  updateDriveModeUI();
+}
+
+function updateDriveModeUI() {
+  const btnOmni = document.getElementById('driveOmni');
+  const btnTank = document.getElementById('driveTank');
+  const joystickModeText = document.getElementById('joystickModeText');
+  const buttonsModeText = document.getElementById('buttonsModeText');
+  const btnLeft = document.getElementById('btnLeft');
+  const btnRight = document.getElementById('btnRight');
+
+  if (currentDriveMode === 'omni') {
+    btnOmni.classList.add('active');
+    btnTank.classList.remove('active');
+    joystickModeText.textContent = 'стрейф';
+    buttonsModeText.textContent = 'стрейф';
+
+    // Update button commands for omni mode
+    btnLeft.setAttribute('ontouchstart', "sendCommand('strafe_left')");
+    btnLeft.setAttribute('onmousedown', "sendCommand('strafe_left')");
+    btnRight.setAttribute('ontouchstart', "sendCommand('strafe_right')");
+    btnRight.setAttribute('onmousedown', "sendCommand('strafe_right')");
+  } else {
+    btnOmni.classList.remove('active');
+    btnTank.classList.add('active');
+    joystickModeText.textContent = 'разворот';
+    buttonsModeText.textContent = 'разворот';
+
+    // Update button commands for tank mode
+    btnLeft.setAttribute('ontouchstart', "sendCommand('rotate_left')");
+    btnLeft.setAttribute('onmousedown', "sendCommand('rotate_left')");
+    btnRight.setAttribute('ontouchstart', "sendCommand('rotate_right')");
+    btnRight.setAttribute('onmousedown', "sendCommand('rotate_right')");
+  }
+}
+
 // ========== Calibration ==========
 
 function loadConfigToUI(config) {
@@ -215,6 +265,9 @@ function saveSettings() {
     updateMapping(i);
     updateInvert(i);
   }
+
+  // Save drive mode
+  robot.sendCommand(currentDriveMode === 'omni' ? 'mode_omni' : 'mode_tank');
 
   // Wait a bit for commands to be sent
   setTimeout(() => {
