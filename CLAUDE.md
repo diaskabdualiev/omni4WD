@@ -50,13 +50,32 @@ Motors arranged in X-pattern (viewed from top):
     M3 ↙  ↘ M4
 ```
 
-Movement logic (src/main.cpp:212-252):
+**Button-based Movement Commands** (src/main.cpp:222-262):
 - **Forward**: All motors +speed
 - **Backward**: All motors -speed
 - **Strafe Left**: M1,M4 negative; M2,M3 positive
 - **Strafe Right**: M1,M4 positive; M2,M3 negative
 - **Rotate Left**: M2,M4 positive; M1,M3 negative
 - **Rotate Right**: M1,M3 positive; M2,M4 negative
+
+**Joystick Vector Control** (src/main.cpp:357-390):
+The robot supports two drive modes for joystick control:
+
+1. **Omni Mode (Strafe)** - `omniMode = true` (default):
+   - X-axis: Strafe left/right (sideways movement)
+   - Y-axis: Forward/backward
+   - Formulas: `M1=Y+X, M2=Y-X, M3=Y+X, M4=Y-X`
+   - When joystick full right: Robot strafes right
+   - Ideal for precise positioning with omni wheels
+
+2. **Tank Mode (Rotation)** - `omniMode = false`:
+   - X-axis: Rotate left/right (turn in place)
+   - Y-axis: Forward/backward
+   - Formulas: `M1=Y-X, M2=Y+X, M3=Y-X, M4=Y+X`
+   - When joystick full right: Robot rotates clockwise
+   - Behaves like traditional tank/differential drive
+
+Mode can be switched via commands `mode_omni` / `mode_tank` and is saved to EEPROM.
 
 ## Architecture
 
@@ -69,18 +88,23 @@ Three-layer motor control system:
 ### Configuration System
 - **Motor Mapping**: Maps logical positions (0-3) to physical motors (1-4)
 - **Motor Inversion**: Per-motor direction reversal
+- **Drive Mode**: Omni (strafe) vs Tank (rotation) for joystick control
 - **Storage**: Persisted to ESP32 NVS using Preferences library
-- **Default**: Direct mapping (logical N → physical N+1)
+- **Default**: Direct mapping (logical N → physical N+1), Omni mode enabled
 
-Configuration keys in EEPROM: `map0-map3` (int), `inv0-inv3` (bool)
+Configuration keys in EEPROM: `map0-map3` (int), `inv0-inv3` (bool), `omniMode` (bool)
 
 ### Web Interface
-Single-page application with two tabs embedded in PROGMEM (src/main.cpp:398-1115):
+Single-page application with two tabs embedded in PROGMEM (src/main.cpp:449-1367):
 
 **Control Tab**:
-- Two-column layout (directions on left, rotation on right)
+- Control mode switcher: Joystick vs Buttons
+- Drive mode switcher: Omni (strafe) vs Tank (rotation)
+- Joystick mode: Canvas-based virtual joystick with vector control
+- Button mode: Directional control buttons
 - Speed slider (0-255 PWM)
 - Emergency stop button
+- Dynamic UI hints showing current drive mode behavior
 
 **Calibration Tab**:
 - 2×2 visual grid matching physical robot layout
@@ -96,13 +120,19 @@ Text-based commands over WebSocket (`/ws`):
 **Calibration**: `test_{0-3}_{fwd|bwd|stop}` (tests logical motor at position)
 
 **Configuration**:
-- `get_config` → returns JSON `{mapping:[...], invert:[...]}`
+- `get_config` → returns JSON `{mapping:[...], invert:[...], omniMode:true|false}`
 - `set_map:{pos}:{motor}` → map logical position to physical motor
 - `set_inv:{pos}:{true|false}` → set direction inversion
 - `save_config` → persist to EEPROM
 - `reset_config` → restore defaults
 
+**Drive Mode**:
+- `mode_omni` → switch to Omni mode (strafe)
+- `mode_tank` → switch to Tank mode (rotation)
+
 **Speed**: `speed:{0-255}` → set current speed
+
+**Joystick**: `joy:{x}:{y}` → vector control where x,y are -255 to 255
 
 ## WiFi Configuration
 

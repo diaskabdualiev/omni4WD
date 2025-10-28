@@ -42,6 +42,9 @@ Preferences preferences;
 // Текущая скорость (0-255)
 int currentSpeed = 200;  // ~80% от 255
 
+// Режим управления: true = Omni (strafe), false = Tank (rotation)
+bool omniMode = true;
+
 // Конфигурация моторов
 // motorMapping[логическая_позиция] = физический_мотор
 // Логические позиции: 0=передний-правый, 1=передний-левый, 2=задний-левый, 3=задний-правый
@@ -63,6 +66,8 @@ void loadConfig() {
     motorInvert[i] = preferences.getBool(key.c_str(), false);  // По умолчанию не инвертировано
   }
 
+  omniMode = preferences.getBool("omniMode", true);
+
   preferences.end();
 
   Serial.println("\nКонфигурация загружена из EEPROM:");
@@ -78,6 +83,7 @@ void loadConfig() {
     if (i < 3) Serial.print(", ");
   }
   Serial.println("]");
+  Serial.printf("  Режим: %s\n", omniMode ? "Omni (strafe)" : "Tank (rotation)");
 }
 
 void saveConfig() {
@@ -90,6 +96,8 @@ void saveConfig() {
     key = "inv" + String(i);
     preferences.putBool(key.c_str(), motorInvert[i]);
   }
+
+  preferences.putBool("omniMode", omniMode);
 
   preferences.end();
   Serial.println("✓ Конфигурация сохранена в EEPROM");
@@ -120,7 +128,9 @@ String getConfigJSON() {
     json += motorInvert[i] ? "true" : "false";
     if (i < 3) json += ",";
   }
-  json += "]}";
+  json += "],\"omniMode\":";
+  json += omniMode ? "true" : "false";
+  json += "}";
   return json;
 }
 
@@ -312,6 +322,12 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
       moveDiagonalBackwardRight();
     } else if (command == "stop") {
       stopAllMotors();
+    } else if (command == "mode_omni") {
+      omniMode = true;
+      Serial.println("✓ Режим: Omni (strafe)");
+    } else if (command == "mode_tank") {
+      omniMode = false;
+      Serial.println("✓ Режим: Tank (rotation)");
     }
     // Команды калибровки - тест по ЛОГИЧЕСКОЙ позиции (с учетом маппинга)
     else if (command.startsWith("test_")) {
@@ -343,12 +359,29 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
       int joyX = command.substring(4, firstColon).toInt();
       int joyY = command.substring(firstColon + 1).toInt();
 
-      // Джойстик управление: Y = forward/backward, X = rotation
-      // Комбинированное управление для омни-платформы
-      int m1 = constrain(joyY - joyX, -255, 255);
-      int m2 = constrain(joyY + joyX, -255, 255);
-      int m3 = constrain(joyY - joyX, -255, 255);
-      int m4 = constrain(joyY + joyX, -255, 255);
+      // X-конфигурация омни-платформы с двумя режимами
+      //     M1 ↗  ↖ M2
+      //         ╲╱
+      //         ╱╲
+      //     M3 ↙  ↘ M4
+
+      int m1, m2, m3, m4;
+
+      if (omniMode) {
+        // OMNI MODE: X = стрейф влево/вправо, Y = вперёд/назад
+        // Формулы: M1=Y+X, M2=Y-X, M3=Y+X, M4=Y-X
+        m1 = constrain(joyY + joyX, -255, 255);
+        m2 = constrain(joyY - joyX, -255, 255);
+        m3 = constrain(joyY + joyX, -255, 255);
+        m4 = constrain(joyY - joyX, -255, 255);
+      } else {
+        // TANK MODE: X = разворот влево/вправо, Y = вперёд/назад
+        // Формулы: M1=Y-X, M2=Y+X, M3=Y-X, M4=Y+X
+        m1 = constrain(joyY - joyX, -255, 255);
+        m2 = constrain(joyY + joyX, -255, 255);
+        m3 = constrain(joyY - joyX, -255, 255);
+        m4 = constrain(joyY + joyX, -255, 255);
+      }
 
       setMotor(1, m1);
       setMotor(2, m2);
@@ -855,11 +888,16 @@ const char index_html[] PROGMEM = R"rawliteral(
 
     <!-- Вкладка 1: Управление -->
     <div class="tab-content active" id="tab-control">
-      <!-- Переключатель режимов -->
+      <!-- Переключатель режимов управления и типа -->
       <div style="text-align:center; margin-bottom:20px;">
-        <div style="display:inline-flex; background:#f1f5f9; border-radius:8px; padding:4px;">
+        <div style="display:inline-flex; background:#f1f5f9; border-radius:8px; padding:4px; margin-bottom:10px;">
           <button id="modeJoystick" class="mode-btn active" onclick="switchMode('joystick')">🕹️ Джойстик</button>
           <button id="modeButtons" class="mode-btn" onclick="switchMode('buttons')">🎮 Кнопки</button>
+        </div>
+        <br>
+        <div style="display:inline-flex; background:#e0f2fe; border-radius:8px; padding:4px;">
+          <button id="driveOmni" class="mode-btn active" onclick="switchDriveMode('omni')">🔄 Omni (Strafe)</button>
+          <button id="driveTank" class="mode-btn" onclick="switchDriveMode('tank')">🎯 Tank (Rotation)</button>
         </div>
       </div>
 
@@ -871,6 +909,9 @@ const char index_html[] PROGMEM = R"rawliteral(
 
       <!-- Режим джойстика -->
       <div id="joystick-mode" class="control-mode">
+        <div style="text-align:center; margin-bottom:10px; color:#64748b; font-size:13px;">
+          🕹️ Вверх/Вниз: движение • Влево/Вправо: <span id="joystickModeText">стрейф</span>
+        </div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:20px;">
           <!-- Джойстик слева -->
           <div>
@@ -880,9 +921,9 @@ const char index_html[] PROGMEM = R"rawliteral(
             </div>
           </div>
 
-          <!-- Стрейф справа -->
+          <!-- Кнопки влево/вправо справа -->
           <div>
-            <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Стрейф</h3>
+            <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;" id="joystickSideLabel">Стрейф</h3>
             <div class="rotate-buttons">
               <button class="btn" ontouchstart="sendCommand('left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('left')" onmouseup="sendCommand('stop')">⟲</button>
               <button class="btn" ontouchstart="sendCommand('right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('right')" onmouseup="sendCommand('stop')">⟳</button>
@@ -893,6 +934,9 @@ const char index_html[] PROGMEM = R"rawliteral(
 
       <!-- Режим кнопок -->
       <div id="buttons-mode" class="control-mode" style="display:none;">
+        <div style="text-align:center; margin-bottom:10px; color:#64748b; font-size:13px;">
+          🎮 ⬆️⬇️ движение • ⬅️➡️ <span id="buttonsModeText">разворот</span>
+        </div>
         <div class="joystick-layout">
         <!-- Левая половина: направления -->
         <div>
@@ -912,9 +956,9 @@ const char index_html[] PROGMEM = R"rawliteral(
           </div>
         </div>
 
-        <!-- Правая половина: стрейф -->
+        <!-- Правая половина: стрейф/разворот -->
         <div>
-          <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;">Стрейф</h3>
+          <h3 style="text-align:center; margin-bottom:10px; color:#475569; font-weight:500; font-size:14px;" id="buttonsSideLabel">Разворот</h3>
           <div class="rotate-buttons">
             <button class="btn" ontouchstart="sendCommand('left')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('left')" onmouseup="sendCommand('stop')">⟲</button>
             <button class="btn" ontouchstart="sendCommand('right')" ontouchend="sendCommand('stop')" onmousedown="sendCommand('right')" onmouseup="sendCommand('stop')">⟳</button>
@@ -1066,6 +1110,7 @@ const char index_html[] PROGMEM = R"rawliteral(
   <script>
     let ws;
     const statusEl = document.getElementById('status');
+    let currentDriveMode = 'omni';  // 'omni' or 'tank'
 
     function initWebSocket() {
       ws = new WebSocket('ws://' + window.location.hostname + '/ws');
@@ -1143,6 +1188,12 @@ const char index_html[] PROGMEM = R"rawliteral(
         document.getElementById('map' + i).value = config.mapping[i];
         document.getElementById('inv' + i).checked = config.invert[i];
       }
+
+      // Load drive mode
+      if (config.omniMode !== undefined) {
+        currentDriveMode = config.omniMode ? 'omni' : 'tank';
+        updateDriveModeUI();
+      }
     }
 
     function updateMapping(pos) {
@@ -1161,6 +1212,8 @@ const char index_html[] PROGMEM = R"rawliteral(
         updateMapping(i);
         updateInvert(i);
       }
+      // Отправить текущий режим вождения
+      sendCommand(currentDriveMode === 'omni' ? 'mode_omni' : 'mode_tank');
       // Сохранить в EEPROM
       sendCommand('save_config');
     }
@@ -1169,6 +1222,38 @@ const char index_html[] PROGMEM = R"rawliteral(
       if (confirm('Сбросить все настройки к дефолту?')) {
         sendCommand('reset_config');
         alert('🔄 Настройки сброшены! Не забудь сохранить.');
+      }
+    }
+
+    // ========== ПЕРЕКЛЮЧЕНИЕ РЕЖИМА ВОЖДЕНИЯ ==========
+    function switchDriveMode(mode) {
+      currentDriveMode = mode;
+      sendCommand(mode === 'omni' ? 'mode_omni' : 'mode_tank');
+      updateDriveModeUI();
+    }
+
+    function updateDriveModeUI() {
+      const btnOmni = document.getElementById('driveOmni');
+      const btnTank = document.getElementById('driveTank');
+      const joystickModeText = document.getElementById('joystickModeText');
+      const buttonsModeText = document.getElementById('buttonsModeText');
+      const joystickSideLabel = document.getElementById('joystickSideLabel');
+      const buttonsSideLabel = document.getElementById('buttonsSideLabel');
+
+      if (currentDriveMode === 'omni') {
+        btnOmni.classList.add('active');
+        btnTank.classList.remove('active');
+        joystickModeText.textContent = 'стрейф';
+        buttonsModeText.textContent = 'стрейф';
+        joystickSideLabel.textContent = 'Стрейф';
+        buttonsSideLabel.textContent = 'Стрейф';
+      } else {
+        btnOmni.classList.remove('active');
+        btnTank.classList.add('active');
+        joystickModeText.textContent = 'разворот';
+        buttonsModeText.textContent = 'разворот';
+        joystickSideLabel.textContent = 'Разворот';
+        buttonsSideLabel.textContent = 'Разворот';
       }
     }
 
