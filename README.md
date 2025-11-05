@@ -6,7 +6,9 @@ ESP32-based controller for a 4-wheel omni-directional robot with X-configuration
 
 ## 3D Model
 
-<iframe src="https://mystu28259.autodesk360.com/shares/public/SH28cd1QT2badd0ea72bc6be23fc66090b41?mode=embed" width="800" height="600" allowfullscreen="true" webkitallowfullscreen="true" mozallowfullscreen="true" frameborder="0"></iframe>
+**[View Interactive 3D Model on Autodesk 360](https://mystu28259.autodesk360.com/shares/public/SH28cd1QT2badd0ea72bc6be23fc66090b41?mode=embed)**
+
+[![3D Model Preview](https://img.shields.io/badge/Autodesk_360-3D_Model-blue?style=for-the-badge&logo=autodesk)](https://mystu28259.autodesk360.com/shares/public/SH28cd1QT2badd0ea72bc6be23fc66090b41?mode=embed)
 
 ## Features
 
